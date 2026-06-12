@@ -20,6 +20,8 @@ from src.core.highlight_engine import HighlightEngine
 from src.core.docx_utils import open_document, MM_TO_TWIPS, PT_TO_TWIPS
 from src.core.main_controller import MainController
 from src.core.document_model import DocumentModel
+from config_editor import open_config_editor
+from monitor import open_monitor
 
 # Настройка логирования
 logging.basicConfig(
