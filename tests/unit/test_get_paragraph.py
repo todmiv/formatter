@@ -28,8 +28,11 @@ def test_get_paragraph():
     # Используем тестовый документ с колонтитулами
     test_doc_path = "test_header_container.docx"
     if not os.path.exists(test_doc_path):
-        print(f"Тестовый документ {test_doc_path} не найден, используем Том II_Волжск.docx")
         test_doc_path = "Том II_Волжск.docx"
+    
+    if not os.path.exists(test_doc_path):
+        import pytest
+        pytest.skip("Тестовый документ не найден (test_header_container.docx или Том II_Волжск.docx)")
     
     doc = docx.Document(test_doc_path)
     print(f"Тестируем документ: {test_doc_path}")
