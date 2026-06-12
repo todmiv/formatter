@@ -80,7 +80,7 @@ class GOSTFormatterGUI:
         self.entry_config.insert(0, self.config_path)
         self.entry_config.grid(row=1, column=1, padx=5, pady=5)
         ttk.Button(top_frame, text="Обзор...", command=self.browse_config).grid(row=1, column=2, pady=5)
-        ttk.Button(top_frame, text="Открыть для редактирования", command=self.open_config_editor).grid(row=1, column=3, padx=(5,0), pady=5)
+        ttk.Button(top_frame, text="Открыть для редактирования", command=self.open_config_editor_window).grid(row=1, column=3, padx=(5,0), pady=5)
 
         # --- Панель действий ---
         action_frame = ttk.Frame(self.root, padding=5)
@@ -504,7 +504,7 @@ class GOSTFormatterGUI:
             self.log(f"Ошибка при открытии документа: {e}")
             messagebox.showerror("Ошибка", f"Не удалось открыть документ:\n{str(e)}")
 
-    def open_config_editor(self):
+    def open_config_editor_window(self):
         """Открыть визуальный редактор конфигурации."""
         config_path = self.entry_config.get().strip()
         if not config_path or not os.path.exists(config_path):
