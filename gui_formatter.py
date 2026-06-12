@@ -110,6 +110,9 @@ class GOSTFormatterGUI:
         self.btn_ignore_settings = ttk.Button(action_frame, text="👁 Игнорировать ошибки", command=self.open_ignore_settings)
         self.btn_ignore_settings.pack(side=tk.LEFT, padx=5)
 
+        self.btn_monitor = ttk.Button(action_frame, text="📊 Мониторинг", command=self.open_monitor_window)
+        self.btn_monitor.pack(side=tk.LEFT, padx=5)
+
         self.btn_save = ttk.Button(action_frame, text="💾 Сохранить результат", command=self.save_document, state=tk.DISABLED)
         self.btn_save.pack(side=tk.RIGHT, padx=5)
 
@@ -514,6 +517,15 @@ class GOSTFormatterGUI:
             self.log(f"Ошибка при открытии редактора: {e}")
             messagebox.showerror("Ошибка", f"Не удалось открыть редактор:\n{str(e)}")
 
+    def open_monitor_window(self):
+        """Открыть панель мониторинга в реальном времени."""
+        try:
+            open_monitor(self.root, self.controller)
+            self.log("Открыт мониторинг системы")
+        except Exception as e:
+            self.log(f"Ошибка при открытии мониторинга: {e}")
+            messagebox.showerror("Ошибка", f"Не удалось открыть мониторинг:\n{str(e)}")
+
     def highlight_issues(self):
         """Создать копию документа с подсветкой проблемных элементов и открыть её."""
         doc_path = self.controller.doc_path if self.controller else None
@@ -701,8 +713,6 @@ class GOSTFormatterGUI:
             doc_model = self.controller.document_model
         else:
             try:
-from src.core.document_model import DocumentModel
-from config_editor import open_config_editor
                 doc_model = DocumentModel(doc_path)
             except Exception as e:
                 self.log(f"Ошибка при создании модели документа {doc_path}: {e}")
