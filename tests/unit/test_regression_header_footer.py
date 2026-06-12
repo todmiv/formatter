@@ -31,9 +31,9 @@ class TestHeaderFooterRegression(unittest.TestCase):
     def setUpClass(cls):
         """Настройка перед всеми тестами."""
         # Загрузка конфигурации
-        config_path = "config.yaml"
+        config_path = "configs/active/config.yaml"
         if not os.path.exists(config_path):
-            config_path = "config_v4.2.yaml"
+            config_path = "configs/active/config_v4.2.yaml"
         cls.config = ConfigLoader(config_path)
         cls.config.load()
         

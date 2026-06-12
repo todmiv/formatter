@@ -11,7 +11,7 @@ from src.core.audit_engine import AuditEngine
 from src.apply.apply_orchestrator import ApplyOrchestrator
 
 def main():
-    config_path = 'config.yaml'
+    config_path = 'configs/active/config.yaml'
     doc_path = 'test_output.docx'
     output_path = 'test_output_fixed.docx'
     

@@ -29,10 +29,10 @@ class CompleteFixCycleTester:
         self.max_iterations = max_iterations
         
         if config_path is None:
-            if os.path.exists("config.yaml"):
-                config_path = "config.yaml"
-            elif os.path.exists("config_v4.2.yaml"):
-                config_path = "config_v4.2.yaml"
+            if os.path.exists("configs/active/config.yaml"):
+                config_path = "configs/active/config.yaml"
+            elif os.path.exists("configs/active/config_v4.2.yaml"):
+                config_path = "configs/active/config_v4.2.yaml"
             else:
                 raise FileNotFoundError("Не найден файл конфигурации")
         self.config_path = config_path

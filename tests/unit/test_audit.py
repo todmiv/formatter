@@ -19,7 +19,7 @@ from src.core.audit_engine import AuditEngine
 
 def main():
     # Путь к конфигурации и файлу
-    CONFIG_PATH = 'config.yaml'
+    CONFIG_PATH = 'configs/active/config.yaml'
     # Используем существующий тестовый файл
     DOC_PATH = 'test_output.docx'
     # Если файла нет, попробуем другой

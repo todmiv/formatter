@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 
 def test_header_footer_fix():
     """Основной тест: аудит и применение исправлений для колонтитулов."""
-    config_path = "config.yaml"
+    config_path = "configs/active/config.yaml"
     if not os.path.exists(config_path):
-        config_path = "config_v4.2.yaml"
+        config_path = "configs/active/config_v4.2.yaml"
     
     doc_path = "(ГЕНЕРАЦИЯ) Том II Черкесск Демография.docx"
     if not os.path.exists(doc_path):

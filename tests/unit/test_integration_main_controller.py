@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class IntegrationTester:
     def __init__(self, doc_path: str):
         self.doc_path = doc_path
-        self.controller = MainController("config.yaml")
+        self.controller = MainController("configs/active/config.yaml")
         self.results = {}
         
     def run_full_integration_test(self):

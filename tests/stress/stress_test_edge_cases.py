@@ -26,7 +26,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 class StressTester:
-    def __init__(self, config_path: str = "config.yaml"):
+    def __init__(self, config_path: str = "configs/active/config.yaml"):
         self.config_path = config_path
         self.config = ConfigLoader(config_path)
         self.config.load()

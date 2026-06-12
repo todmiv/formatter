@@ -40,7 +40,7 @@ def test_apply_styles_only():
         doc_path = os.path.join(tmpdir, "test.docx")
         create_test_document(doc_path)
         
-        loader = ConfigLoader("config.yaml")
+        loader = ConfigLoader("configs/active/config.yaml")
         loader.load()
         
         # Создаём искусственные проблемы
@@ -101,7 +101,7 @@ def test_apply_with_direct_overrides():
         doc_path = os.path.join(tmpdir, "test.docx")
         create_test_document(doc_path)
         
-        loader = ConfigLoader("config.yaml")
+        loader = ConfigLoader("configs/active/config.yaml")
         loader.load()
         
         issues = [
@@ -139,7 +139,7 @@ def test_clear_direct_formatting():
         doc_path = os.path.join(tmpdir, "test.docx")
         create_test_document(doc_path)
         
-        loader = ConfigLoader("config.yaml")
+        loader = ConfigLoader("configs/active/config.yaml")
         loader.load()
         
         issues = [
@@ -177,7 +177,7 @@ def test_apply_styles_only_method():
         doc_path = os.path.join(tmpdir, "test.docx")
         create_test_document(doc_path)
         
-        loader = ConfigLoader("config.yaml")
+        loader = ConfigLoader("configs/active/config.yaml")
         loader.load()
         
         issues = [
@@ -216,7 +216,7 @@ def test_performance_optimization():
             p.style = doc.styles['Normal']
         doc.save(doc_path)
         
-        loader = ConfigLoader("config.yaml")
+        loader = ConfigLoader("configs/active/config.yaml")
         loader.load()
         
         # Создаём 100 проблем
@@ -262,7 +262,7 @@ def test_main_controller_integration():
         doc_path = os.path.join(tmpdir, "test.docx")
         create_test_document(doc_path)
         
-        controller = MainController("config.yaml")
+        controller = MainController("configs/active/config.yaml")
         controller.set_document(doc_path)
         
         # Создаём искусственные проблемы

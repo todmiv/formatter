@@ -12,7 +12,7 @@ from src.core.config_loader import ConfigLoader
 
 def find_config_file():
     """Находит конфигурационный файл."""
-    candidates = ["config_v4.2.yaml", "config.yaml", "config.json"]
+    candidates = ["configs/active/config_v4.2.yaml", "configs/active/config.yaml"]
     for c in candidates:
         if os.path.exists(c):
             return c

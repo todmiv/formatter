@@ -13,7 +13,7 @@ def test_preview():
     app = GOSTFormatterGUI(root)
     
     # Загружаем конфиг и выполняем аудит (имитируем)
-    config_path = 'config.yaml'
+    config_path = 'configs/active/config.yaml'
     doc_path = 'test_output.docx'
     if not os.path.exists(doc_path):
         # Попробуем найти другой

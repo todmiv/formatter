@@ -32,9 +32,9 @@ def test_highlight():
     print(f"Работаем с копией: {doc_copy}")
     
     # Инициализируем контроллер
-    config_path = "config.yaml"
+    config_path = "configs/active/config.yaml"
     if not os.path.exists(config_path):
-        config_path = "config_v4.2.yaml"
+        config_path = "configs/active/config_v4.2.yaml"
     print(f"Используем конфиг: {config_path}")
     
     controller = MainController(config_path)

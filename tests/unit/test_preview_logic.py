@@ -17,7 +17,7 @@ def test_preview_logic():
         else:
             print("Нет DOCX файлов для теста.")
             return
-    config_path = 'config.yaml'
+    config_path = 'configs/active/config.yaml'
     
     loader = ConfigLoader(config_path)
     loader.load()

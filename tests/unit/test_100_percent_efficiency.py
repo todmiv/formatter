@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 class HundredPercentEfficiencyTest:
     """Тестовый цикл для достижения 100% эффективности."""
     
-    def __init__(self, config_path: str = "config_v4.2.yaml"):
+    def __init__(self, config_path: str = "configs/active/config_v4.2.yaml"):
         self.config_path = config_path
         self.config = ConfigLoader(config_path)
         self.config.load()
@@ -316,7 +316,7 @@ def main():
                        help='Путь к исходному документу (по умолчанию: Том II_Волжск.docx)')
     parser.add_argument('--iterations', '-i', type=int, default=5,
                        help='Максимальное количество итераций (по умолчанию: 5)')
-    parser.add_argument('--config', '-c', default='config_v4.2.yaml',
+    parser.add_argument('--config', '-c', default='configs/active/config_v4.2.yaml',
                        help='Путь к конфигурационному файлу')
     parser.add_argument('--validate', '-v', action='store_true',
                        help='Провести валидацию результатов')
