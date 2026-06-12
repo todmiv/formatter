@@ -611,7 +611,7 @@ class AuditEngine:
             if 'font' in style_config:
                 issues = self._check_font(para, style_config['font'], target_style_name, para_idx, 0)
                 for issue in issues:
-                    # Обновляем локацию для колонтитула
+                    issue.category = "HEADER_FOOTER"
                     issue.location = {'section': sect_idx, 'paragraph': para_idx, 'page': 0, 'container': container}
                     self.issues.append(issue)
 
@@ -619,6 +619,7 @@ class AuditEngine:
             if 'paragraph' in style_config:
                 issues = self._check_paragraph_formatting(para, style_config['paragraph'], target_style_name, para_idx, 0)
                 for issue in issues:
+                    issue.category = "HEADER_FOOTER"
                     issue.location = {'section': sect_idx, 'paragraph': para_idx, 'page': 0, 'container': container}
                     self.issues.append(issue)
 
