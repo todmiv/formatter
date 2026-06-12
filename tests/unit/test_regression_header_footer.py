@@ -41,7 +41,9 @@ class TestHeaderFooterRegression(unittest.TestCase):
         cls.apply_engine = ApplyOrchestrator(cls.config)
         
         # Путь к тестовому документу с колонтитулами
-        cls.test_doc_path = "Том II_Волжск.docx"
+        cls.test_doc_path = "tests/test.docx"
+        if not os.path.exists(cls.test_doc_path):
+            cls.test_doc_path = "Том II_Волжск.docx"
         if not os.path.exists(cls.test_doc_path):
             # Если нет, создадим простой документ с колонтитулами для теста
             cls._create_test_document_with_headers()

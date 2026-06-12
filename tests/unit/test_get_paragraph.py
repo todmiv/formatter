@@ -26,7 +26,9 @@ def test_get_paragraph():
     engine = ApplyOrchestrator(config)
     
     # Используем тестовый документ с колонтитулами
-    test_doc_path = "test_header_container.docx"
+    test_doc_path = "tests/test.docx"
+    if not os.path.exists(test_doc_path):
+        test_doc_path = "test_header_container.docx"
     if not os.path.exists(test_doc_path):
         test_doc_path = "Том II_Волжск.docx"
     
