@@ -8,7 +8,10 @@ from tkinter import ttk
 import threading
 import time
 import os
-import psutil
+try:
+    import psutil
+except ImportError:
+    psutil = None
 import logging
 from collections import deque
 from datetime import datetime
@@ -219,7 +222,13 @@ class MonitorWindow:
     def _update_metrics(self):
         """Собирает и обновляет метрики."""
         try:
-            # Системные
+            if not psutil:
+                self.cpu_history.append(0)
+                self.ram_history.append(0)
+                self.process_cpu_history.append(0)
+                self.process_ram_history.append(0)
+                return
+
             cpu = psutil.cpu_percent(interval=0)
             ram = psutil.virtual_memory()
             ram_mb = ram.used / (1024 * 1024)
@@ -227,7 +236,6 @@ class MonitorWindow:
             self.cpu_history.append(cpu)
             self.ram_history.append(ram_mb)
 
-            # Процесс приложения
             proc = psutil.Process(os.getpid())
             proc_cpu = proc.cpu_percent(interval=0)
             proc_mem = proc.memory_info().rss / (1024 * 1024)
@@ -235,7 +243,6 @@ class MonitorWindow:
             self.process_cpu_history.append(proc_cpu)
             self.process_ram_history.append(proc_mem)
 
-            # Обновление карточек
             self.card_cpu._value_label.config(text=f"{cpu:.1f}%")
             self.card_cpu._unit_label.config(text=f"cores: {psutil.cpu_count()}")
 
