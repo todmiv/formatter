@@ -390,33 +390,46 @@ class RI2013Converter:
                 i += 1
                 continue
             
-            # Список (п. 2.8) — только маркированные списки
-            if re.match(r'^[-•*]\s+', line):
+            # Список (п. 2.8) — маркированные и индентированные списки
+            if re.match(r'^[\s]*[-•*]\s+', line):
                 self._add_list_item(line)
                 i += 1
                 continue
             
+            # Подпись таблицы: **Таблица X.Y.Z** или **Название**
+            if re.match(r'^\*\*Таблица\s+\d+', line) or re.match(r'^\*\*Перечень\s+', line):
+                self._add_caption(line)
+                i += 1
+                continue
+            
             # Заголовок 1 уровня - РАЗДЕЛ (Таблица 2.1)
-            elif line.startswith('# ') or re.match(r'^\d+\.\s+', line):
+            # Только markdown # или真正的 разделы "1. Текст" (без нумерованных списков)
+            if line.startswith('# '):
                 self._add_heading(line.replace('# ', ''), level=1)
                 i += 1
                 continue
             
-            # Заголовок 2 уровня - ГЛАВА (Таблица 2.1)
-            elif line.startswith('## ') or re.match(r'^\d+\.\s+[А-Я]', line):
+            # Заголовок 2 уровня - ГЛАВА
+            if line.startswith('## '):
                 self._add_heading(line.replace('## ', ''), level=2)
                 i += 1
                 continue
             
-            # Заголовок 3 уровня - ПУНКТ (Таблица 2.1)
-            elif line.startswith('### ') or re.match(r'^\d+\.\d+\s+', line):
+            # Заголовок 3 уровня - ПУНКТ
+            if line.startswith('### '):
                 self._add_heading(line.replace('### ', ''), level=3)
                 i += 1
                 continue
             
-            # Заголовок 4 уровня - ПОДПУНКТ (Таблица 2.1)
-            elif line.startswith('#### '):
+            # Заголовок 4 уровня - ПОДПУНКТ
+            if line.startswith('#### '):
                 self._add_heading(line.replace('#### ', ''), level=4)
+                i += 1
+                continue
+            
+            # Нумерованный список: "1. **текст**" или "1. текст"
+            if re.match(r'^\d+\.\s+', line):
+                self._add_list_item(line)
                 i += 1
                 continue
             
@@ -460,13 +473,12 @@ class RI2013Converter:
                 continue
     
     def _add_heading(self, text, level=1):
-        """Добавление заголовка (Таблица 2.1)"""
-        text = self._clean_text(text)
-        style_name = f'Heading {level}'
-        paragraph = self.doc.add_paragraph(text, style=style_name)
+        """Добавление заголовка (Таблица 2.1) с поддержкой **bold**"""
+        paragraph = self.doc.add_paragraph(style=f'Heading {level}')
+        self._add_rich_text(paragraph, text)
         
-        if text.endswith('.'):
-            paragraph.text = text[:-1]
+        if paragraph.text.endswith('.'):
+            paragraph.text = paragraph.text[:-1]
         
         if hasattr(self, 'page_manager') and self.page_manager:
             if level == 1:
@@ -480,13 +492,40 @@ class RI2013Converter:
         return paragraph
     
     def _add_paragraph(self, text):
-        """Добавление абзаца текста (п. 2.7.2)"""
-        text = self._clean_text(text)
-        paragraph = self.doc.add_paragraph(text, style='Normal')
-        
-        # Запрет переноса слов (п. 2.7.3)
+        """Добавление абзаца текста (п. 2.7.2) с поддержкой **bold**"""
+        paragraph = self.doc.add_paragraph(style='Normal')
+        self._add_rich_text(paragraph, text)
         self._disable_hyphenation(paragraph)
-        
+        return paragraph
+    
+    def _add_rich_text(self, paragraph, text):
+        """Добавляет текст с поддержкой **bold** сегментов в параграф."""
+        parts = re.split(r'(\*\*.*?\*\*)', text)
+        for part in parts:
+            if part.startswith('**') and part.endswith('**'):
+                inner = self._clean_text(part[2:-2])
+                run = paragraph.add_run(inner)
+                run.bold = True
+                run.font.name = 'Times New Roman'
+                rPr = run._element.get_or_add_rPr()
+                rFonts = rPr.get_or_add_rFonts()
+                rFonts.set(qn('w:eastAsia'), 'Times New Roman')
+            else:
+                cleaned = self._clean_text(part)
+                if cleaned:
+                    run = paragraph.add_run(cleaned)
+                    run.font.name = 'Times New Roman'
+                    rPr = run._element.get_or_add_rPr()
+                    rFonts = rPr.get_or_add_rFonts()
+                    rFonts.set(qn('w:eastAsia'), 'Times New Roman')
+    
+    def _add_caption(self, text):
+        """Добавление подписи таблицы/рисунка (п. 2.10.2, 2.11.2)"""
+        cleaned = self._clean_text(text)
+        paragraph = self.doc.add_paragraph(cleaned, style='Caption')
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        if paragraph.text.endswith('.'):
+            paragraph.text = paragraph.text[:-1]
         return paragraph
     
     def _add_table(self, table_lines, table_counter, section_num, chapter_num):
@@ -737,11 +776,20 @@ class RI2013Converter:
         return paragraph
     
     def _add_list_item(self, text):
-        """Добавление элемента списка (п. 2.8)"""
-        text = self._clean_text(text)
-        paragraph = self.doc.add_paragraph(text, style='List Paragraph')
+        """Добавление элемента списка (п. 2.8) с поддержкой **bold** и номеров"""
+        paragraph = self.doc.add_paragraph(style='List Paragraph')
         
-        indent_level = self._get_list_indent_level(text)
+        # Определяем уровень вложенности по количеству ведущих пробелов
+        stripped = text.lstrip()
+        leading_spaces = len(text) - len(stripped)
+        
+        if leading_spaces >= 6:
+            indent_level = 3
+        elif leading_spaces >= 3:
+            indent_level = 2
+        else:
+            indent_level = 1
+        
         list_config = self.config.get('styles', {}).get('List Paragraph', {}).get('paragraph', {})
         indent_map = {
             1: list_config.get('left_indent_level_1_cm', 0.75),
@@ -752,6 +800,9 @@ class RI2013Converter:
         
         first_indent = list_config.get('first_line_indent_cm', 0)
         paragraph.paragraph_format.first_line_indent = Cm(first_indent)
+        
+        # Добавляем текст с поддержкой bold
+        self._add_rich_text(paragraph, stripped)
         
         return paragraph
     
