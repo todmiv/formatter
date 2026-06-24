@@ -373,6 +373,7 @@ class RI2013Converter:
         total_lines = len(lines)
         i = 0
         table_counter = {'current': 0}
+        caption_added = False
         last_logged_percent = 0
         
         while i < total_lines:
@@ -392,6 +393,7 @@ class RI2013Converter:
             
             # Список (п. 2.8) — маркированные и индентированные списки
             if re.match(r'^[\s]*[-•*]\s+', line):
+                caption_added = False
                 self._add_list_item(line)
                 i += 1
                 continue
@@ -399,36 +401,41 @@ class RI2013Converter:
             # Подпись таблицы: **Таблица X.Y.Z** или **Название**
             if re.match(r'^\*\*Таблица\s+\d+', line) or re.match(r'^\*\*Перечень\s+', line):
                 self._add_caption(line)
+                caption_added = True
                 i += 1
                 continue
             
             # Заголовок 1 уровня - РАЗДЕЛ (Таблица 2.1)
-            # Только markdown # или真正的 разделы "1. Текст" (без нумерованных списков)
             if line.startswith('# '):
+                caption_added = False
                 self._add_heading(line.replace('# ', ''), level=1)
                 i += 1
                 continue
             
             # Заголовок 2 уровня - ГЛАВА
             if line.startswith('## '):
+                caption_added = False
                 self._add_heading(line.replace('## ', ''), level=2)
                 i += 1
                 continue
             
             # Заголовок 3 уровня - ПУНКТ
             if line.startswith('### '):
+                caption_added = False
                 self._add_heading(line.replace('### ', ''), level=3)
                 i += 1
                 continue
             
             # Заголовок 4 уровня - ПОДПУНКТ
             if line.startswith('#### '):
+                caption_added = False
                 self._add_heading(line.replace('#### ', ''), level=4)
                 i += 1
                 continue
             
             # Нумерованный список: "1. **текст**" или "1. текст"
             if re.match(r'^\d+\.\s+', line):
+                caption_added = False
                 self._add_list_item(line)
                 i += 1
                 continue
@@ -444,7 +451,8 @@ class RI2013Converter:
                 # Проверка на разделительную строку таблицы
                 if len(table_lines) > 1 and re.match(r'^\|[\s\-:|]+\|$', table_lines[1]):
                     table_counter['current'] += 1
-                    self._add_table(table_lines, table_counter, self._current_section, self._current_chapter)
+                    self._add_table(table_lines, table_counter, self._current_section, self._current_chapter, skip_caption=caption_added)
+                    caption_added = False
                 else:
                     # Это не таблица, а текст с вертикальными чертами
                     # Возвращаем i на начало и обрабатываем каждую строку как обычный текст
@@ -468,6 +476,7 @@ class RI2013Converter:
             
             # Обычный текст (п. 2.7.2)
             else:
+                caption_added = False
                 self._add_paragraph(line)
                 i += 1
                 continue
@@ -528,16 +537,14 @@ class RI2013Converter:
             paragraph.text = paragraph.text[:-1]
         return paragraph
     
-    def _add_table(self, table_lines, table_counter, section_num, chapter_num):
+    def _add_table(self, table_lines, table_counter, section_num, chapter_num, skip_caption=False):
         """Добавление таблицы по НТД 01-2013 (п. 2.10)"""
-        # Парсинг данных таблицы
         data = self._parse_table_data(table_lines)
         
         if not data or len(data) < 2:
             return
         
-        # Нумерация таблицы (п. 2.10.1)
-        if len(data) > 2:  # Если больше одной таблицы
+        if not skip_caption and len(data) > 2:
             table_num = table_counter['current']
             if chapter_num > 0:
                 table_title = f"Таблица {section_num}.{chapter_num}.{table_num}"

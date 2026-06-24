@@ -79,10 +79,10 @@ class StyleManager:
                 style.font.size = Pt(font_cfg['size'])
             style.font.bold = font_cfg.get('bold', False)
             style.font.italic = font_cfg.get('italic', False)
-            if 'color' in font_cfg:
-                color = normalize_color(font_cfg['color'])
-                if color is not None:
-                    style.font.color.rgb = color
+            color_val = font_cfg.get('color', 'black')
+            color = normalize_color(color_val)
+            if color is not None:
+                style.font.color.rgb = color
             east_asia = font_cfg.get('east_asia', font_cfg.get('name', 'Times New Roman'))
             style._element.rPr.rFonts.set(qn('w:eastAsia'), east_asia)
 
