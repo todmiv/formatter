@@ -551,34 +551,93 @@ class RI2013Converter:
             else:
                 table_title = f"Таблица {section_num}.{table_num}"
             
-            # Название таблицы (п. 2.10.2)
             caption_paragraph = self.doc.add_paragraph(table_title, style='Caption')
             caption_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            # Удаление точки в конце (п. 2.10.2)
             if caption_paragraph.text.endswith('.'):
                 caption_paragraph.text = caption_paragraph.text[:-1]
         
-        # Создание шапки таблицы как отдельной таблицы (п. 2.10.3)
-        header_data = [data[0]]  # Первая строка - заголовки
+        # Определяем, есть ли строка нумерации граф после заголовка
+        numbering_row_idx = None
+        if len(data) > 2 and self._is_numbering_row(data[1]):
+            numbering_row_idx = 1
         
-        header_table = self.doc.add_table(rows=1, cols=len(header_data[0]))
+        # Шапка таблицы: заголовок + опционально строка нумерации
+        if numbering_row_idx is not None:
+            header_data = data[:2]
+        else:
+            header_data = [data[0]]
+        
+        header_table = self.doc.add_table(rows=len(header_data), cols=len(header_data[0]))
         header_table.style = 'Table Grid'
         self._setup_table_header(header_table, header_data[0])
+        if numbering_row_idx is not None:
+            self._setup_numbering_row(header_table, header_data[1])
         
-        spacing_cfg = self.config.get('formatting_rules', {}).get('tables', {}).get('spacing', {})
-        between_tables_pt = spacing_cfg.get('between_table_note', 0)
+        # Spacer между шапкой и телом — минимальная высота
         spacer = self.doc.add_paragraph()
-        spacer.paragraph_format.space_after = Pt(between_tables_pt)
+        spacer.paragraph_format.space_after = Pt(0)
         spacer.paragraph_format.space_before = Pt(0)
-        spacer.paragraph_format.line_spacing = 1.0
+        spacer.paragraph_format.line_spacing = Pt(1)
+        pPr = spacer._element.get_or_add_pPr()
+        spacing = pPr.find(qn('w:spacing'))
+        if spacing is None:
+            spacing = OxmlElement('w:spacing')
+            pPr.append(spacing)
+        spacing.set(qn('w:line'), '20')
+        spacing.set(qn('w:lineRule'), 'exact')
+        spacing.set(qn('w:before'), '0')
+        spacing.set(qn('w:after'), '0')
+        run = spacer.add_run('')
+        run.font.size = Pt(1)
         
-        # Основная таблица с данными
-        main_table = self.doc.add_table(rows=len(data)-1, cols=len(data[0]))
+        # Основная таблица
+        body_start = (numbering_row_idx + 1) if numbering_row_idx is not None else 1
+        main_table = self.doc.add_table(rows=len(data) - body_start, cols=len(data[0]))
         main_table.style = 'Table Grid'
-        self._setup_main_table(main_table, data[1:], header_data[0])
+        self._setup_main_table(main_table, data[body_start:], header_data[0])
         
         # Интервал после таблицы 6 пт (п. 2.10.13)
         self.doc.add_paragraph().paragraph_format.space_after = Pt(6)
+    
+    def _is_numbering_row(self, row_data):
+        """Проверяет, является ли строка строкой нумерации граф (1 | 2 | 3 | ...)"""
+        for cell in row_data:
+            cleaned = cell.strip().replace(' ', '')
+            if not re.match(r'^\d+$', cleaned):
+                return False
+        return True
+    
+    def _setup_numbering_row(self, table, row_data):
+        """Настройка строки нумерации граф (п. 2.10.3)"""
+        row = table.rows[1]
+        table_font_cfg = self.config.get('styles', {}).get('Table Grid', {}).get('font', {})
+        font_name = table_font_cfg.get('name', 'Times New Roman')
+        font_size = table_font_cfg.get('size', 12)
+        
+        for i, cell_text in enumerate(row_data):
+            if i >= len(row.cells):
+                break
+            cell = row.cells[i]
+            cell.text = cell_text.strip()
+            for paragraph in cell.paragraphs:
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                paragraph.paragraph_format.line_spacing = 1.0
+                paragraph.paragraph_format.first_line_indent = Cm(0)
+                paragraph.paragraph_format.space_before = Pt(0)
+                paragraph.paragraph_format.space_after = Pt(0)
+                for run in paragraph.runs:
+                    run.font.name = font_name
+                    run.font.size = Pt(font_size)
+                    rPr = run._element.get_or_add_rPr()
+                    rFonts = rPr.get_or_add_rFonts()
+                    rFonts.set(qn('w:eastAsia'), font_name)
+            cell.margin_left = Cm(0)
+            cell.margin_right = Cm(0)
+            cell.margin_top = Cm(0)
+            cell.margin_bottom = Cm(0)
+            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+        
+        self._set_table_row_height(table, 1, 'minimum')
     
     def _parse_table_data(self, table_lines):
         """Парсинг данных таблицы из Markdown"""
