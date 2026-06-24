@@ -573,22 +573,29 @@ class RI2013Converter:
         if numbering_row_idx is not None:
             self._setup_numbering_row(header_table, header_data[1])
         
-        # Spacer между шапкой и телом — минимальная высота
+        # Spacer между шапкой и телом — 0.5 пт
         spacer = self.doc.add_paragraph()
         spacer.paragraph_format.space_after = Pt(0)
         spacer.paragraph_format.space_before = Pt(0)
-        spacer.paragraph_format.line_spacing = Pt(1)
         pPr = spacer._element.get_or_add_pPr()
         spacing = pPr.find(qn('w:spacing'))
         if spacing is None:
             spacing = OxmlElement('w:spacing')
             pPr.append(spacing)
-        spacing.set(qn('w:line'), '20')
+        spacing.set(qn('w:line'), '10')
         spacing.set(qn('w:lineRule'), 'exact')
         spacing.set(qn('w:before'), '0')
         spacing.set(qn('w:after'), '0')
+        # Маркер: custom style чтобы аудит не трогал этот параграф
+        spacer.style = self.doc.styles['Normal']
         run = spacer.add_run('')
         run.font.size = Pt(1)
+        # Прямое форматирование поверх стиля — приоритет
+        pStyle = pPr.find(qn('w:pStyle'))
+        if pStyle is None:
+            pStyle = OxmlElement('w:pStyle')
+            pPr.insert(0, pStyle)
+        pStyle.set(qn('w:val'), 'Normal')
         
         # Основная таблица
         body_start = (numbering_row_idx + 1) if numbering_row_idx is not None else 1
@@ -700,9 +707,12 @@ class RI2013Converter:
         
         # Настройка высоты строки 0 см, режим минимум (п. 2.10.8)
         self._set_table_row_height(table, 0, 'minimum')
+        if numbering_row_idx is not None:
+            self._set_table_row_height(table, 1, 'minimum')
         
-        # Отключение нижней границы шапки (п. 2.10.3)
-        self._remove_bottom_border(header_row)
+        # Отключение нижней границы шапки (п. 2.10.3) — с последней строки
+        last_header_row = table.rows[len(header_data) - 1]
+        self._remove_bottom_border(last_header_row)
         
         # Нумерация граф (п. 2.10.3)
         self._add_column_numbering(table)
