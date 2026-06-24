@@ -573,6 +573,15 @@ class RI2013Converter:
         if numbering_row_idx is not None:
             self._setup_numbering_row(header_table, header_data[1])
         
+        # Настройка высоты строки 0 см, режим минимум (п. 2.10.8)
+        self._set_table_row_height(header_table, 0, 'minimum')
+        if numbering_row_idx is not None:
+            self._set_table_row_height(header_table, 1, 'minimum')
+        
+        # Отключение нижней границы шапки (п. 2.10.3) — с последней строки
+        last_header_row = header_table.rows[len(header_data) - 1]
+        self._remove_bottom_border(last_header_row)
+        
         # Spacer между шапкой и телом — 0.5 пт
         spacer = self.doc.add_paragraph()
         spacer.paragraph_format.space_after = Pt(0)
@@ -705,18 +714,6 @@ class RI2013Converter:
             # Выравнивание по центру сверху (п. 2.10.7)
             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
         
-        # Настройка высоты строки 0 см, режим минимум (п. 2.10.8)
-        self._set_table_row_height(table, 0, 'minimum')
-        if numbering_row_idx is not None:
-            self._set_table_row_height(table, 1, 'minimum')
-        
-        # Отключение нижней границы шапки (п. 2.10.3) — с последней строки
-        last_header_row = table.rows[len(header_data) - 1]
-        self._remove_bottom_border(last_header_row)
-        
-        # Нумерация граф (п. 2.10.3)
-        self._add_column_numbering(table)
-    
     def _setup_main_table(self, table, data, headers):
         """Настройка основной таблицы (п. 2.10)"""
         table_font_cfg = self.config.get('styles', {}).get('Table Grid', {}).get('font', {})
