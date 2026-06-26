@@ -14,24 +14,16 @@ import re
 import yaml
 import logging
 import argparse
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List
 from docx import Document
-from docx.shared import Pt, Cm, Twips, RGBColor
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
+from src.core.docx_utils import ALIGNMENT_MAP
 
 logger = logging.getLogger(__name__)
 
 TWIPS_TO_CM = 1 / 567
 TWIPS_TO_PT = 1 / 20
-
-ALIGNMENT_MAP = {
-    'both': 'justify',
-    'left': 'left',
-    'center': 'center',
-    'right': 'right',
-    None: 'left',
-}
 
 HEADING_PATTERNS = [
     (r'^РАЗДЕЛ\s+\d+', 'Heading 1'),

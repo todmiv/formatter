@@ -372,7 +372,7 @@ pytest tests/unit/test_docx_snapshots.py
 
 ## Статус проекта
 
-### ✅ Template-based форматирование и CLI (2026-06-26)
+### ✅ Версия 2.0 — Template-based форматирование и CLI (2026-06-26)
 Реализована система форматирования на основе DOCX-шаблонов по аналогии с Pandoc `--reference-doc`:
 
 #### Новые модули

@@ -10,7 +10,6 @@ import datetime
 import shutil
 from typing import List, Optional, Dict, Any, Callable
 
-import docx
 from src.core.config_loader import ConfigLoader
 from src.core.audit_engine import AuditEngine, AuditIssue, Severity
 from src.apply.apply_orchestrator import ApplyOrchestrator
@@ -466,9 +465,115 @@ class MainController:
     def apply_all_fixes_with_optimization(self, max_iterations: int = 3) -> Dict[str, Any]:
         """
         Применяет исправления ко всем найденным проблемам с оптимизированным алгоритмом.
-        
+
         :param max_iterations: Максимальное количество итераций.
         :return: Детальный отчёт с результатами.
         """
         issue_ids = [issue.id for issue in self.current_issues]
         return self.apply_fixes_with_optimization(issue_ids, max_iterations=max_iterations)
+
+    def apply_template(self, template_path: str, output_path: str) -> Dict[str, Any]:
+        """
+        Применяет стили из DOCX-шаблона к текущему документу.
+
+        :param template_path: путь к DOCX-шаблону.
+        :param output_path: путь для сохранения результата.
+        :return: статистика {'styles_applied': int, ...}.
+        """
+        from src.apply.style_applier import StyleApplier
+
+        if not self.doc_path:
+            raise ValueError("Документ не выбран")
+
+        applier = StyleApplier(template_path)
+        result = applier.apply(self.doc_path, output_path)
+
+        self._log(f"Шаблон применён: {result.get('styles_applied', 0)} стилей скопировано")
+        return result
+
+    def extract_config_from_template(self, template_path: str, output_path: str) -> Dict[str, Any]:
+        """
+        Извлекает YAML-конфиг из DOCX-шаблона.
+
+        :param template_path: путь к DOCX-шаблону.
+        :param output_path: путь для сохранения YAML.
+        :return: извлечённая конфигурация.
+        """
+        from src.core.template_extractor import TemplateExtractor
+
+        extractor = TemplateExtractor(template_path)
+        config = extractor.extract()
+        extractor.save_yaml(output_path, config)
+
+        self._log(f"Конфиг извлечён: {output_path}")
+        return config
+
+    def diff_with_template(self, template_path: str) -> Dict[str, Any]:
+        """
+        Сравнивает текущий документ с шаблоном.
+
+        :param template_path: путь к DOCX-шаблону.
+        :return: результат сравнения.
+        """
+        from src.apply.style_applier import StyleApplier
+
+        if not self.doc_path:
+            raise ValueError("Документ не выбран")
+
+        applier = StyleApplier(template_path)
+        return applier.diff(self.doc_path)
+
+    def set_tolerances(self, font: int = None, indent: int = None, spacing: int = None):
+        """
+        Устанавливает допуски для аудита.
+
+        :param font: допуск размера шрифта (twips).
+        :param indent: допуск отступов (twips).
+        :param spacing: допуск интервалов (twips).
+        """
+        if font is not None:
+            self.font_tolerance = font
+        if indent is not None:
+            self.indent_tolerance = indent
+        if spacing is not None:
+            self.spacing_tolerance = spacing
+
+        if self.audit_engine:
+            self.audit_engine.FONT_SIZE_TOLERANCE_TWIPS = self.font_tolerance
+            self.audit_engine.INDENT_TOLERANCE_TWIPS = self.indent_tolerance
+            self.audit_engine.SPACING_TOLERANCE_TWIPS = self.spacing_tolerance
+
+        self._log(f"Допуски обновлены: font={self.font_tolerance}, indent={self.indent_tolerance}, spacing={self.spacing_tolerance}")
+
+    def get_ignore_settings(self) -> Dict[str, Any]:
+        """Возвращает текущие настройки игнорирования."""
+        return {
+            'categories': self.ignored_categories.copy(),
+            'severities': [s.value for s in self.ignored_severities],
+        }
+
+    def set_ignore_settings(self, categories: List[str] = None, severities: List[str] = None):
+        """
+        Устанавливает настройки игнорирования.
+
+        :param categories: список категорий для игнорирования.
+        :param severities: список уровней важности для игнорирования.
+        """
+        from src.core.audit_engine import Severity
+
+        if categories is not None:
+            self.ignored_categories = categories
+        if severities is not None:
+            self.ignored_severities = [Severity(s) for s in severities]
+
+        self._log(f"Настройки игнорирования обновлены: {len(self.ignored_categories)} категорий, {len(self.ignored_severities)} уровней")
+
+    def get_audit_summary(self) -> Dict[str, int]:
+        """
+        Возвращает сводку по результатам аудита.
+
+        :return: словарь {'CRITICAL': int, 'WARNING': int, 'INFO': int}.
+        """
+        if self.audit_engine:
+            return self.audit_engine.get_summary()
+        return {'CRITICAL': 0, 'WARNING': 0, 'INFO': 0}

@@ -8,18 +8,11 @@ import datetime
 import logging
 import shutil
 import time
-import docx
 
-# Импорт новых модулей ядра
-from src.core.config_loader import ConfigLoader
-from src.core.audit_engine import AuditEngine, Severity
-from src.apply.apply_orchestrator import ApplyOrchestrator
-from src.core.report_manager import ReportManager
-from md_to_docx import RI2013Converter
-from src.core.highlight_engine import HighlightEngine
-from src.core.docx_utils import open_document, MM_TO_TWIPS, PT_TO_TWIPS
+# Импорт модулей ядра
+from src.core.audit_engine import Severity
+from src.core.docx_utils import MM_TO_TWIPS, PT_TO_TWIPS
 from src.core.main_controller import MainController
-from src.core.document_model import DocumentModel
 from src.config_editor.dialog import ConfigEditorDialog
 from monitor import open_monitor
 
@@ -538,15 +531,7 @@ class GOSTFormatterGUI:
 
         def apply_thread():
             try:
-                from src.apply.style_applier import StyleApplier
-                applier = StyleApplier(template_path)
-                result = applier.apply(
-                    self.controller.doc_path,
-                    output_path,
-                    copy_styles=True,
-                    copy_page_setup=True,
-                    copy_headers_footers=True,
-                )
+                result = self.controller.apply_template(template_path, output_path)
                 self.root.after(0, lambda: (
                     self.status_var.set(f"Шаблон применён: {result['styles_applied']} стилей"),
                     self.progress_var.set(100),
@@ -579,10 +564,7 @@ class GOSTFormatterGUI:
             return
 
         try:
-            from src.core.template_extractor import TemplateExtractor
-            extractor = TemplateExtractor(template_path)
-            config = extractor.extract()
-            extractor.save_yaml(output_path, config)
+            config = self.controller.extract_config_from_template(template_path, output_path)
             self.log(f"Конфиг извлечён: {output_path}")
             messagebox.showinfo(
                 "Готово",
@@ -1808,17 +1790,8 @@ ID: {issue.id}
                 self.font_tolerance = new_font
                 self.indent_tolerance = new_indent
                 self.spacing_tolerance = new_spacing
-                # Обновляем значения в контроллере
-                self.controller.font_tolerance = new_font
-                self.controller.indent_tolerance = new_indent
-                self.controller.spacing_tolerance = new_spacing
-                # Обновляем значения в аудит-движке (если он существует)
-                if self.controller.audit_engine:
-                    self.controller.audit_engine.FONT_SIZE_TOLERANCE_TWIPS = new_font
-                    self.controller.audit_engine.INDENT_TOLERANCE_TWIPS = new_indent
-                    self.controller.audit_engine.SPACING_TOLERANCE_TWIPS = new_spacing
-                # Также можно сохранить в конфиг (дополнительно)
-                self.log(f"Допуски обновлены: шрифт={new_font} twips ({float(font_var_mm.get()):.2f} мм, {float(font_var_pt.get()):.2f} pt), отступ={new_indent} twips ({float(indent_var_mm.get()):.2f} мм, {float(indent_var_pt.get()):.2f} pt), интервал={new_spacing} twips ({float(spacing_var_mm.get()):.2f} мм, {float(spacing_var_pt.get()):.2f} pt)")
+                self.controller.set_tolerances(font=new_font, indent=new_indent, spacing=new_spacing)
+                self.log(f"Допуски обновлены: шрифт={new_font} twips, отступ={new_indent} twips, интервал={new_spacing} twips")
                 messagebox.showinfo("Сохранено", "Допуски успешно сохранены.")
                 settings_win.destroy()
             except ValueError as e:

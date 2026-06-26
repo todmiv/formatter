@@ -1,19 +1,16 @@
 # audit_engine.py
 
 import re
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import docx
-from docx.shared import Twips, Pt, Cm
 from docx.oxml.ns import qn
-from docx.oxml import OxmlElement
 import logging
 logger = logging.getLogger(__name__)
 
-# Импорт локального загрузчика
 from src.core.config_loader import ConfigLoader
-from src.core.docx_utils import get_xml_attr_twips, get_paragraph_indent_twips, get_paragraph_spacing_twips, get_paragraph_alignment, get_font_properties, normalize_color
+from src.core.docx_utils import get_xml_attr_twips, normalize_color
 
 class Severity(Enum):
     INFO = "INFO"
@@ -66,18 +63,28 @@ class AuditEngine:
         if self.progress_callback:
             self.progress_callback(stage, progress, total, message)
 
-    def scan_document(self, doc_path: str) -> List[AuditIssue]:
-        """Запускает полный аудит документа."""
+    def scan_document(self, doc_path: str = None, doc=None) -> List[AuditIssue]:
+        """Запускает полный аудит документа.
+
+        :param doc_path: путь к документу (используется если doc не передан).
+        :param doc: объект Document для аудита (DI).
+        :return: список найденных проблем.
+        """
         self.issues = []
         self.issue_counter = 0
-        
-        logger.info(f"Начало аудита документа: {doc_path}")
-        try:
-            doc = docx.Document(doc_path)
-            logger.debug(f"Документ открыт успешно. Параграфов: {len(doc.paragraphs)}, таблиц: {len(doc.tables)}")
-        except Exception as e:
-            logger.error(f"Не удалось открыть документ {doc_path}: {e}", exc_info=True)
-            raise RuntimeError(f"Не удалось открыть документ: {e}")
+
+        if doc is None:
+            if doc_path is None:
+                raise ValueError("Необходимо указать doc_path или doc")
+            logger.info(f"Начало аудита документа: {doc_path}")
+            try:
+                doc = docx.Document(doc_path)
+                logger.debug(f"Документ открыт: параграфов={len(doc.paragraphs)}, таблиц={len(doc.tables)}")
+            except Exception as e:
+                logger.error(f"Не удалось открыть документ {doc_path}: {e}", exc_info=True)
+                raise RuntimeError(f"Не удалось открыть документ: {e}")
+        else:
+            logger.info("Аудит переданного объекта Document")
 
         # Подсчёт элементов для прогресса
         total_paragraphs = len(doc.paragraphs)

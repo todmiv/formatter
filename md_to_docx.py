@@ -128,7 +128,7 @@ class RI2013Converter:
                     }
                 },
                 'Heading 2': {
-                    'font': {'name': 'Calibri Light', 'size': 14, 'bold': True, 'italic': True},
+                    'font': {'name': 'Calibri Light', 'size': 14, 'bold': True, 'italic': False},
                     'paragraph': {
                         'first_line_indent_cm': 0,
                         'line_spacing': 1.25,
@@ -246,73 +246,16 @@ class RI2013Converter:
         """Настройка документа согласно НТД 01-2013"""
         self.page_manager = PageManager(self.config)
         self.page_manager.apply_all(self.doc)
-        
+
         if self.style_manager:
             self.style_manager.setup_styles(self.doc)
         else:
-            self._setup_styles()
-    
-    def _setup_styles(self):
-        """Настройка стилей документа"""
-        styles_config = self.config['styles']
-        
-        # Настройка стиля Normal (п. 2.7.2)
-        normal_style = self.doc.styles['Normal']
-        normal_config = styles_config['Normal']
-        self._apply_style_settings(normal_style, normal_config)
-        
-        # Настройка заголовков (Таблица 2.1)
-        for heading_level in range(1, 5):
-            style_name = f'Heading {heading_level}'
-            if style_name in styles_config:
-                heading_style = self.doc.styles[f'Heading {heading_level}']
-                self._apply_style_settings(heading_style, styles_config[style_name])
-        
-        # Настройка дополнительных стилей
-        additional_styles = ['Caption', 'Table Note', 'List Paragraph', 'Note']
-        for style_name in additional_styles:
-            if style_name in styles_config:
-                # Проверяем, существует ли стиль в документе, если нет - создаём
-                if style_name not in self.doc.styles:
-                    # Создаём стиль параграфа
-                    style = self.doc.styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
-                else:
-                    style = self.doc.styles[style_name]
-                self._apply_style_settings(style, styles_config[style_name])
-    
-    def _apply_style_settings(self, style, config):
-        """Применение настроек стиля"""
-        font_config = config['font']
-        style.font.name = font_config['name']
-        style.font.size = Pt(font_config['size'])
-        style.font.bold = font_config['bold']
-        style.font.italic = font_config['italic']
-        
-        east_asia = font_config.get('east_asia', font_config['name'])
-        style.element.rPr.rFonts.set(qn('w:eastAsia'), east_asia)
-        
-        # Абзац (п. 2.7.2, Таблица 2.1)
-        paragraph_config = config['paragraph']
-        style.paragraph_format.first_line_indent = Cm(paragraph_config['first_line_indent_cm'])
-        style.paragraph_format.line_spacing = paragraph_config['line_spacing']
-        style.paragraph_format.space_before = Pt(paragraph_config['space_before_pt'])
-        style.paragraph_format.space_after = Pt(paragraph_config['space_after_pt'])
-        
-        # Выравнивание
-        alignment_map = {
-            'left': WD_ALIGN_PARAGRAPH.LEFT,
-            'center': WD_ALIGN_PARAGRAPH.CENTER,
-            'right': WD_ALIGN_PARAGRAPH.RIGHT,
-            'justify': WD_ALIGN_PARAGRAPH.JUSTIFY
-        }
-        style.paragraph_format.alignment = alignment_map.get(
-            paragraph_config['alignment'], 
-            WD_ALIGN_PARAGRAPH.JUSTIFY
-        )
-        
-        # Разрыв страницы перед заголовком (Таблица 2.1 - РАЗДЕЛ)
-        if paragraph_config.get('page_break_before', False):
-            style.paragraph_format.page_break_before = True
+            from src.core.style_manager import StyleManager
+            from src.core.config_loader import ConfigLoader
+            loader = ConfigLoader('')
+            loader.styles = self.config.get('styles', {})
+            sm = StyleManager(loader)
+            sm.setup_styles(self.doc)
     
     def convert(self, md_path, docx_path, progress_callback=None):
         """Конвертация Markdown файла в DOCX
@@ -503,6 +446,8 @@ class RI2013Converter:
     def _add_paragraph(self, text):
         """Добавление абзаца текста (п. 2.7.2) с поддержкой **bold**"""
         paragraph = self.doc.add_paragraph(style='Normal')
+        paragraph.paragraph_format.line_spacing = 1.15
+        paragraph.paragraph_format.first_line_indent = Cm(1.25)
         self._add_rich_text(paragraph, text)
         self._disable_hyphenation(paragraph)
         return paragraph
@@ -581,7 +526,10 @@ class RI2013Converter:
         # Отключение нижней границы шапки (п. 2.10.3) — с последней строки
         last_header_row = header_table.rows[len(header_data) - 1]
         self._remove_bottom_border(last_header_row)
-        
+
+        # Вычисление и установка одинаковых ширин колонок для шапки и тела
+        self._sync_column_widths(header_table, data)
+
         # Spacer между шапкой и телом — 0.5 пт
         spacer = self.doc.add_paragraph()
         spacer.paragraph_format.space_after = Pt(0)
@@ -611,6 +559,9 @@ class RI2013Converter:
         main_table = self.doc.add_table(rows=len(data) - body_start, cols=len(data[0]))
         main_table.style = 'Table Grid'
         self._setup_main_table(main_table, data[body_start:], header_data[0])
+
+        # Установка одинаковых ширин колонок для тела таблицы
+        self._sync_column_widths(main_table, data)
         
         # Интервал после таблицы 6 пт (п. 2.10.13)
         self.doc.add_paragraph().paragraph_format.space_after = Pt(6)
@@ -678,7 +629,7 @@ class RI2013Converter:
         header_row = table.rows[0]
         table_font_cfg = self.config.get('styles', {}).get('Table Grid', {}).get('font', {})
         font_name = table_font_cfg.get('name', 'Times New Roman')
-        font_size = table_font_cfg.get('size', 12)
+        font_size = 10  # 10pt как в образце
         
         for i, header_text in enumerate(headers):
             header_text = self._clean_text(header_text)
@@ -701,24 +652,25 @@ class RI2013Converter:
                 for run in paragraph.runs:
                     run.font.name = font_name
                     run.font.size = Pt(font_size)
+                    run.bold = True
                     rPr = run._element.get_or_add_rPr()
                     rFonts = rPr.get_or_add_rFonts()
                     rFonts.set(qn('w:eastAsia'), font_name)
-            
+
             # Обнуление margin ячеек
             cell.margin_left = Cm(0)
             cell.margin_right = Cm(0)
             cell.margin_top = Cm(0)
             cell.margin_bottom = Cm(0)
-            
+
             # Выравнивание по центру сверху (п. 2.10.7)
             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
-        
+
     def _setup_main_table(self, table, data, headers):
         """Настройка основной таблицы (п. 2.10)"""
         table_font_cfg = self.config.get('styles', {}).get('Table Grid', {}).get('font', {})
         font_name = table_font_cfg.get('name', 'Times New Roman')
-        font_size = table_font_cfg.get('size', 12)
+        font_size = 10  # 10pt как в образце
         
         for row_idx, row_data in enumerate(data):
             row = table.rows[row_idx]
@@ -779,7 +731,63 @@ class RI2013Converter:
         trHeight.set(qn('w:val'), '0')
         trHeight.set(qn('w:hRule'), mode)
         tr.append(trHeight)
-    
+
+    def _sync_column_widths(self, table, all_data):
+        """Синхронизация ширины колонок между шапкой и телом таблицы.
+
+        Вычисляет ширину колонок на основе самой длинной строки во всех строках
+        (шапка + тело) и применяет одинаковые фиксированные ширины к таблице.
+        """
+        section = self.doc.sections[0]
+        usable_width_cm = (section.page_width - section.left_margin - section.right_margin) / Cm(1)
+
+        num_cols = len(all_data[0])
+
+        # Вычисление пропорций на основе длины текста
+        col_widths_chars = [0] * num_cols
+        for row in all_data:
+            for i, cell in enumerate(row):
+                if i < num_cols:
+                    col_widths_chars[i] = max(col_widths_chars[i], len(cell))
+
+        total_chars = sum(col_widths_chars)
+        if total_chars == 0:
+            total_chars = num_cols
+
+        col_widths_cm = []
+        for i in range(num_cols):
+            w = (col_widths_chars[i] / total_chars) * usable_width_cm
+            col_widths_cm.append(max(w, 0.5))  # минимум 0.5 см на колонку
+
+        # Пересчитаем суммарно, чтобы точно занять всю ширину
+        total_cm = sum(col_widths_cm)
+        scale = usable_width_cm / total_cm
+        col_widths_cm = [w * scale for w in col_widths_cm]
+
+        # Отключение autofit и установка фиксированных ширин
+        table.autofit = False
+        for row in table.rows:
+            for i, cell in enumerate(row.cells):
+                if i < num_cols:
+                    cell.width = Cm(col_widths_cm[i])
+
+        # Установка ширины через tblGrid для надёжности
+        tbl = table._tbl
+        tblPr = tbl.tblPr
+        tblGrid = tblPr.find(qn('w:tblGrid'))
+        if tblGrid is None:
+            tblGrid = OxmlElement('w:tblGrid')
+            tblPr.append(tblGrid)
+
+        # Удаляем существующие gridCol
+        for gc in tblGrid.findall(qn('w:gridCol')):
+            tblGrid.remove(gc)
+
+        for w in col_widths_cm:
+            gridCol = OxmlElement('w:gridCol')
+            gridCol.set(qn('w:w'), str(int(Cm(w) / 635)))  # EMU в twips: 1 cm ≈ 567 twips
+            tblGrid.append(gridCol)
+
     def _remove_bottom_border(self, row):
         """Отключение нижней границы шапки (п. 2.10.3)"""
         for cell in row.cells:
@@ -850,33 +858,14 @@ class RI2013Converter:
     
     def _add_list_item(self, text):
         """Добавление элемента списка (п. 2.8) с поддержкой **bold** и номеров"""
-        paragraph = self.doc.add_paragraph(style='List Paragraph')
-        
-        # Определяем уровень вложенности по количеству ведущих пробелов
+        paragraph = self.doc.add_paragraph(style='Normal')
+
         stripped = text.lstrip()
-        leading_spaces = len(text) - len(stripped)
-        
-        if leading_spaces >= 6:
-            indent_level = 3
-        elif leading_spaces >= 3:
-            indent_level = 2
-        else:
-            indent_level = 1
-        
-        list_config = self.config.get('styles', {}).get('List Paragraph', {}).get('paragraph', {})
-        indent_map = {
-            1: list_config.get('left_indent_level_1_cm', 0.75),
-            2: list_config.get('left_indent_level_2_cm', 1.00),
-            3: list_config.get('left_indent_level_3_cm', 1.25),
-        }
-        paragraph.paragraph_format.left_indent = Cm(indent_map.get(indent_level, 1.25))
-        
-        first_indent = list_config.get('first_line_indent_cm', 0)
-        paragraph.paragraph_format.first_line_indent = Cm(first_indent)
-        
-        # Добавляем текст с поддержкой bold
+        paragraph.paragraph_format.line_spacing = 1.15
+        paragraph.paragraph_format.first_line_indent = Cm(1.25)
+
         self._add_rich_text(paragraph, stripped)
-        
+
         return paragraph
     
     def _get_list_indent_level(self, text):

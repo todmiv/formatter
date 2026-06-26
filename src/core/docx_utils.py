@@ -8,7 +8,6 @@ from typing import Optional, Dict, Any
 import docx
 from docx.document import Document as DocxDocument
 from docx.text.paragraph import Paragraph
-from docx.table import Table
 from docx.shared import RGBColor
 import logging
 
@@ -17,6 +16,23 @@ logger = logging.getLogger(__name__)
 # Константы преобразования единиц
 MM_TO_TWIPS = 56.7   # 1 мм = 56.7 twips
 PT_TO_TWIPS = 20     # 1 pt = 20 twips
+
+# Маппинг выравнивания: XML значение -> строковое имя
+ALIGNMENT_MAP = {
+    'both': 'justify',
+    'left': 'left',
+    'center': 'center',
+    'right': 'right',
+    None: 'left',
+}
+
+# Обратный маппинг: строковое имя -> WD_ALIGN_PARAGRAPH
+ALIGNMENT_REVERSE_MAP = {
+    'left': 'LEFT',
+    'center': 'CENTER',
+    'right': 'RIGHT',
+    'justify': 'JUSTIFY',
+}
 
 
 # --- Работа с XML ---
@@ -85,9 +101,7 @@ def get_paragraph_alignment(paragraph: Paragraph) -> str:
         if jc_elem is not None:
             val = jc_elem.get(qn('w:val'))
             if val:
-                map_align = {'both': 'justify', 'left': 'left', 'center': 'center', 'right': 'right'}
-                return map_align.get(val, 'left')
-    # По умолчанию
+                return ALIGNMENT_MAP.get(val, 'left')
     return 'left'
 
 
