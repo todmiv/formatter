@@ -16,6 +16,13 @@ from src.core.main_controller import MainController
 from src.config_editor.dialog import ConfigEditorDialog
 from monitor import open_monitor
 
+# Импорт миксинов
+from gui.audit_mixin import AuditMixin
+from gui.document_tree_mixin import DocumentTreeMixin
+from gui.export_mixin import ExportMixin
+from gui.settings_mixin import SettingsMixin
+from gui.highlight_mixin import HighlightMixin
+
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
@@ -27,7 +34,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class GOSTFormatterGUI:
+class GOSTFormatterGUI(AuditMixin, DocumentTreeMixin, ExportMixin, SettingsMixin, HighlightMixin):
     def __init__(self, root):
         self.root = root
         self.root.title("Форматировщик документов по ГОСТ (Audit & Apply)")
