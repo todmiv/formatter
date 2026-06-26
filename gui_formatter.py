@@ -20,7 +20,7 @@ from src.core.highlight_engine import HighlightEngine
 from src.core.docx_utils import open_document, MM_TO_TWIPS, PT_TO_TWIPS
 from src.core.main_controller import MainController
 from src.core.document_model import DocumentModel
-from config_editor import open_config_editor
+from src.config_editor.dialog import ConfigEditorDialog
 from monitor import open_monitor
 
 # Настройка логирования
@@ -83,6 +83,14 @@ class GOSTFormatterGUI:
         self.entry_config.grid(row=1, column=1, padx=5, pady=5)
         ttk.Button(top_frame, text="Обзор...", command=self.browse_config).grid(row=1, column=2, pady=5)
         ttk.Button(top_frame, text="Открыть для редактирования", command=self.open_config_editor_window).grid(row=1, column=3, padx=(5,0), pady=5)
+
+        # Выбор шаблона (reference document)
+        ttk.Label(top_frame, text="Шаблон:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        self.entry_template = ttk.Entry(top_frame, width=50)
+        self.entry_template.grid(row=2, column=1, padx=5, pady=5)
+        ttk.Button(top_frame, text="Обзор...", command=self.browse_template).grid(row=2, column=2, pady=5)
+        ttk.Button(top_frame, text="Применить шаблон", command=self.apply_template).grid(row=2, column=3, padx=(5,0), pady=5)
+        ttk.Button(top_frame, text="Извлечь конфиг", command=self.extract_config_from_template).grid(row=2, column=4, padx=(5,0), pady=5)
 
         # --- Панель действий ---
         action_frame = ttk.Frame(self.root, padding=5)
@@ -494,6 +502,98 @@ class GOSTFormatterGUI:
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось загрузить конфиг: {e}")
 
+    def browse_template(self):
+        """Выбор DOCX-шаблона (reference document)."""
+        filename = filedialog.askopenfilename(
+            filetypes=[("Word Documents", "*.docx"), ("All Files", "*.*")],
+            title="Выберите DOCX-шаблон"
+        )
+        if filename:
+            self.entry_template.delete(0, tk.END)
+            self.entry_template.insert(0, filename)
+            self.log(f"Шаблон выбран: {os.path.basename(filename)}")
+
+    def apply_template(self):
+        """Применение стилей из DOCX-шаблона к текущему документу."""
+        if not self.controller.doc_path:
+            messagebox.showwarning("Внимание", "Сначала выберите документ.")
+            return
+
+        template_path = self.entry_template.get().strip()
+        if not template_path or not os.path.exists(template_path):
+            messagebox.showwarning("Внимание", "Выберите DOCX-шаблон.")
+            return
+
+        output_path = filedialog.asksaveasfilename(
+            defaultextension=".docx",
+            initialfile=os.path.splitext(os.path.basename(self.controller.doc_path))[0] + "_template.docx",
+            filetypes=[("Word Documents", "*.docx")],
+            title="Сохранить результат"
+        )
+        if not output_path:
+            return
+
+        self.status_var.set("Применение шаблона...")
+        self.progress_var.set(0)
+
+        def apply_thread():
+            try:
+                from src.apply.style_applier import StyleApplier
+                applier = StyleApplier(template_path)
+                result = applier.apply(
+                    self.controller.doc_path,
+                    output_path,
+                    copy_styles=True,
+                    copy_page_setup=True,
+                    copy_headers_footers=True,
+                )
+                self.root.after(0, lambda: (
+                    self.status_var.set(f"Шаблон применён: {result['styles_applied']} стилей"),
+                    self.progress_var.set(100),
+                    self.log(f"Шаблон применён из {os.path.basename(template_path)}"),
+                    messagebox.showinfo("Готово", f"Шаблон применён успешно.\nСкопировано стилей: {result['styles_applied']}")
+                ))
+            except Exception as e:
+                self.root.after(0, lambda: (
+                    self.status_var.set("Ошибка применения шаблона"),
+                    self.log(f"Ошибка: {e}"),
+                    messagebox.showerror("Ошибка", f"Не удалось применить шаблон:\n{e}")
+                ))
+
+        threading.Thread(target=apply_thread, daemon=True).start()
+
+    def extract_config_from_template(self):
+        """Извлечение YAML-конфига из DOCX-шаблона."""
+        template_path = self.entry_template.get().strip()
+        if not template_path or not os.path.exists(template_path):
+            messagebox.showwarning("Внимание", "Выберите DOCX-шаблон.")
+            return
+
+        output_path = filedialog.asksaveasfilename(
+            defaultextension=".yaml",
+            initialfile="config_from_template.yaml",
+            filetypes=[("YAML Files", "*.yaml;*.yml")],
+            title="Сохранить конфигурацию"
+        )
+        if not output_path:
+            return
+
+        try:
+            from src.core.template_extractor import TemplateExtractor
+            extractor = TemplateExtractor(template_path)
+            config = extractor.extract()
+            extractor.save_yaml(output_path, config)
+            self.log(f"Конфиг извлечён: {output_path}")
+            messagebox.showinfo(
+                "Готово",
+                f"Конфигурация извлечена:\n{output_path}\n\n"
+                f"Стилей: {len(config.get('styles', {}))}\n"
+                f"Правил определения: {len(config.get('detection_rules', {}))}"
+            )
+        except Exception as e:
+            self.log(f"Ошибка извлечения конфига: {e}")
+            messagebox.showerror("Ошибка", f"Не удалось извлечь конфиг:\n{e}")
+
     def open_document_for_view(self):
         """Открыть выбранный документ для просмотра в ассоциированном приложении."""
         if not self.controller.doc_path or not os.path.exists(self.controller.doc_path):
@@ -513,11 +613,17 @@ class GOSTFormatterGUI:
             messagebox.showwarning("Внимание", "Конфиг не выбран или файл не существует.")
             return
         try:
-            open_config_editor(self.root, config_path)
-            self.log(f"Открыт редактор конфигурации: {config_path}")
+            self._config_editor = ConfigEditorDialog(self.root, config_path,
+                                                       on_close=self._on_config_editor_close)
+            self._config_editor.show()
         except Exception as e:
             self.log(f"Ошибка при открытии редактора: {e}")
             messagebox.showerror("Ошибка", f"Не удалось открыть редактор:\n{str(e)}")
+
+    def _on_config_editor_close(self, is_saved):
+        if is_saved:
+            self._load_config()
+            self.log("Конфигурация обновлена через редактор")
 
     def open_monitor_window(self):
         """Открыть панель мониторинга в реальном времени."""

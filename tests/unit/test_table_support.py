@@ -62,23 +62,25 @@ class TestTableSupport:
     
     def test_get_table_missing_index(self):
         """Проверка ошибки при отсутствии table_index."""
+        from src.core.formatter_errors import FormatterError
         doc = docx.Document(self.doc_path)
         location = {'index': 0}
         try:
             self.engine.table_applier._get_table(doc, location)
-            assert False, "Должно быть исключение ValueError"
-        except ValueError as e:
-            assert "Отсутствует ключ table_index" in str(e)
+            assert False, "Должно быть исключение FormatterError"
+        except FormatterError as e:
+            assert e.kind.name == 'LOCATION_INVALID'
     
     def test_get_table_out_of_range(self):
         """Проверка ошибки при неверном индексе таблицы."""
+        from src.core.formatter_errors import FormatterError
         doc = docx.Document(self.doc_path)
         location = {'table_index': 5, 'type': 'table'}
         try:
             self.engine.table_applier._get_table(doc, location)
-            assert False, "Должно быть исключение ValueError"
-        except ValueError as e:
-            assert "Индекс таблицы 5 вне диапазона" in str(e)
+            assert False, "Должно быть исключение FormatterError"
+        except FormatterError as e:
+            assert e.kind.name == 'TABLE_INDEX_ERROR'
     
     def test_apply_table_style(self):
         """Проверка применения стиля таблицы."""
@@ -367,23 +369,27 @@ class TestUniversalGetElement:
     
     def test_get_element_unsupported_type(self):
         """Неподдерживаемый тип вызывает исключение."""
+        from src.core.formatter_errors import FormatterError
         doc = docx.Document(self.doc_path)
         location = {'type': 'figure'}
         try:
             self.engine.paragraph_applier._get_element(doc, location)
-            assert False, "Должно быть исключение ValueError"
-        except ValueError as e:
-            assert "Тип элемента figure пока не поддерживается" in str(e)
+            assert False, "Должно быть исключение FormatterError"
+        except FormatterError as e:
+            assert e.kind.name == 'LOCATION_INVALID'
+            assert 'figure' in str(e)
     
     def test_get_element_unknown_type(self):
         """Неизвестный тип вызывает исключение."""
+        from src.core.formatter_errors import FormatterError
         doc = docx.Document(self.doc_path)
         location = {'type': 'unknown'}
         try:
             self.engine.paragraph_applier._get_element(doc, location)
-            assert False, "Должно быть исключение ValueError"
-        except ValueError as e:
-            assert "Неизвестный тип элемента" in str(e)
+            assert False, "Должно быть исключение FormatterError"
+        except FormatterError as e:
+            assert e.kind.name == 'LOCATION_INVALID'
+            assert 'unknown' in str(e)
 
 
 if __name__ == '__main__':

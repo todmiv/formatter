@@ -96,8 +96,9 @@ styles:
 
     def test_start_audit_without_document(self):
         """Тест запуска аудита без документа."""
+        from src.core.formatter_errors import FormatterError
         controller = MainController(self.config_path)
-        with self.assertRaises(ValueError):
+        with self.assertRaises(FormatterError):
             controller.start_audit()
 
     def test_start_audit_without_config(self):

@@ -6,6 +6,8 @@
 
 import sys
 import os
+import pytest
+
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from src.core.config_loader import ConfigLoader
@@ -16,41 +18,33 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+
 def test_header_footer_fix():
     """Основной тест: аудит и применение исправлений для колонтитулов."""
     config_path = "configs/active/config.yaml"
     if not os.path.exists(config_path):
         config_path = "configs/active/config_v4.2.yaml"
-    
+
     doc_path = "(ГЕНЕРАЦИЯ) Том II Черкесск Демография.docx"
     if not os.path.exists(doc_path):
-        logger.error(f"Тестовый документ не найден: {doc_path}")
-        return False
-    
+        pytest.skip("Тестовый документ не найден")
+
     logger.info(f"Загружаем конфигурацию из {config_path}")
     config = ConfigLoader(config_path)
     config.load()
-    
-    # 1. Запускаем аудит
+
     logger.info("Запуск аудита документа...")
     audit = AuditEngine(config)
     issues = audit.scan_document(doc_path)
-    
-    # Фильтруем проблемы колонтитулов
+
     header_footer_issues = [i for i in issues if i.category == 'HEADER_FOOTER']
     logger.info(f"Всего проблем: {len(issues)}, из них HEADER_FOOTER: {len(header_footer_issues)}")
-    
-    if len(header_footer_issues) == 0:
-        logger.warning("Нет проблем колонтитулов для тестирования. Возможно, документ уже отформатирован.")
-        # Продолжим тест с другими проблемами для проверки обратной совместимости
-    
-    # 2. Применяем исправления
+
     logger.info("Применение исправлений...")
     apply_engine = ApplyOrchestrator(config)
-    
-    # Сохраняем в тестовый файл, чтобы не портить оригинал
+
     output_path = "test_output_fixed_header_footer.docx"
-    
+
     result = apply_engine.apply_fixes(
         doc_path=doc_path,
         issues=issues,
@@ -59,48 +53,35 @@ def test_header_footer_fix():
         apply_direct_overrides=True,
         clear_direct_formatting=False
     )
-    
+
     logger.info(f"Результат применения: успешно {result['applied']}, неудачно {result['failed']}")
-    
-    # 3. Проверяем, что неудачных исправлений нет (или минимальное количество)
-    if result['failed'] > 0:
-        logger.warning(f"Есть неудачные исправления: {result['failed']}. Анализируем причины...")
-        # Можно дополнительно проанализировать, какие проблемы не удалось применить
-        # Но для целей теста считаем, что это допустимо, если это не колонтитулы
-        # Проверим, были ли неудачи среди колонтитулов
-        # Для этого нужно повторно проаудить и сравнить
-        pass
-    
-    # 4. Проверяем, что проблемы колонтитулов обработаны
-    # Запускаем повторный аудит на исправленном документе
+
     logger.info("Повторный аудит исправленного документа...")
     issues_after = audit.scan_document(output_path)
     header_footer_after = [i for i in issues_after if i.category == 'HEADER_FOOTER']
     logger.info(f"Проблем HEADER_FOOTER после исправлений: {len(header_footer_after)}")
-    
-    # Ожидаем, что количество проблем уменьшилось (или осталось нулевым)
-    if len(header_footer_issues) > 0 and len(header_footer_after) >= len(header_footer_issues):
-        logger.error("Количество проблем колонтитулов не уменьшилось после исправлений!")
-        return False
-    
-    # 5. Проверяем обратную совместимость с ключами index и paragraph_index
+
+    if len(header_footer_issues) > 0:
+        assert len(header_footer_after) < len(header_footer_issues), (
+            f"Количество проблем колонтитулов не уменьшилось: "
+            f"{len(header_footer_issues)} -> {len(header_footer_after)}"
+        )
+
     logger.info("Проверка обратной совместимости...")
-    # Создадим искусственную проблему с ключом index
-    from audit_engine import AuditIssue, Severity
+    from src.core.audit_engine import AuditIssue, Severity
     dummy_issue = AuditIssue(
         id="TEST_INDEX",
         severity=Severity.CRITICAL,
         category="PARAGRAPH",
         element_type="Normal",
-        location={'index': 0},  # Первый параграф
+        location={'index': 0},
         description="Тестовая проблема с ключом index",
         current_value="",
         expected_value="",
         auto_fixable=True,
         fix_payload={'style': 'Normal', 'prop': 'style_name'}
     )
-    
-    # Пробуем применить
+
     test_result = apply_engine.apply_fixes(
         doc_path=doc_path,
         issues=[dummy_issue],
@@ -109,11 +90,8 @@ def test_header_footer_fix():
         apply_direct_overrides=False,
         clear_direct_formatting=False
     )
-    if test_result['failed'] > 0:
-        logger.error("Обратная совместимость с ключом index нарушена!")
-        return False
-    
-    # Проверка с ключом paragraph_index
+    assert test_result['failed'] == 0, "Обратная совместимость с ключом index нарушена!"
+
     dummy_issue2 = AuditIssue(
         id="TEST_PARAGRAPH_INDEX",
         severity=Severity.CRITICAL,
@@ -134,17 +112,12 @@ def test_header_footer_fix():
         apply_direct_overrides=False,
         clear_direct_formatting=False
     )
-    if test_result2['failed'] > 0:
-        logger.error("Обратная совместимость с ключом paragraph_index нарушена!")
-        return False
-    
+    assert test_result2['failed'] == 0, "Обратная совместимость с ключом paragraph_index нарушена!"
+
     logger.info("Обратная совместимость подтверждена.")
-    
-    # 6. Проверка обработки колонтитулов с container
-    # Создадим искусственную проблему для колонтитула
-    # Сначала узнаем структуру документа
+
     import docx
-    from docx_utils import open_document
+    from src.core.docx_utils import open_document
     doc = open_document(doc_path)
     if len(doc.sections) > 0:
         section = doc.sections[0]
@@ -169,20 +142,6 @@ def test_header_footer_fix():
                 apply_direct_overrides=False,
                 clear_direct_formatting=False
             )
-            if test_result3['failed'] > 0:
-                logger.error("Обработка колонтитула с container нарушена!")
-                return False
-            else:
-                logger.info("Обработка колонтитула с container успешна.")
-    
-    logger.info("Все проверки пройдены успешно.")
-    return True
+            assert test_result3['failed'] == 0, "Обработка колонтитула с container нарушена!"
 
-if __name__ == "__main__":
-    success = test_header_footer_fix()
-    if success:
-        print("\n[OK] Тест пройден: ApplyEngine корректно обрабатывает колонтитулы.")
-        sys.exit(0)
-    else:
-        print("\n[FAIL] Тест не пройден.")
-        sys.exit(1)
+    logger.info("Все проверки пройдены успешно.")

@@ -197,7 +197,8 @@ def open_document(doc_path: str) -> DocxDocument:
         return docx.Document(doc_path)
     except Exception as e:
         logger.error(f"Не удалось открыть документ {doc_path}: {e}")
-        raise RuntimeError(f"Не удалось открыть документ: {e}")
+        from src.core.formatter_errors import raise_docx_open_error
+        raise_docx_open_error(doc_path, str(e))
 
 
 # --- Конвертация единиц ---

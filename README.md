@@ -16,6 +16,13 @@
 - **Поддержка таблиц** – аудит и применение стилей к таблицам, ячейкам, строкам с исправлением выравнивания, границ и отступов.
 - **Обработка колонтитулов** – аудит и исправление header/footer в соответствии с конфигурацией, поддержка разных колонтитулов для четных/нечетных страниц.
 - **Итеративное применение** – механизм повторного аудита и применения исправлений до достижения 100% соответствия ГОСТ.
+- **Визуальный редактор конфигураций** – GUI для редактирования YAML-конфигураций с деревом, типизированными виджетами и предпросмотром стилей.
+- **Шаблон-based форматирование** – применение стилей из DOCX-шаблона (reference document) по аналогии с Pandoc `--reference-doc`.
+- **Извлечение конфига из шаблона** – генерация YAML-конфига из DOCX-документа с автоматическим определением стилей.
+- **Модульная система includes** – подключение YAML-файлов через секцию `includes` с глубоким слиянием.
+- **Типизированные ошибки** – FormatterError с уникальными exit codes и контекстными подсказками.
+- **Snapshot-тесты** – сравнение XML-структуры DOCX с эталонными снимками.
+- **CLI-интерфейс** – полный набор команд для форматирования, аудита, извлечения конфигов и пакетной обработки.
 
 ## Архитектура
 
@@ -26,10 +33,16 @@
 - **AuditEngine** – движок аудита, выполняющий сканирование документа и сравнение с конфигурацией.
 - **ApplyOrchestrator** – координатор применения исправлений, делегирующий работу специализированным апплерам (FontApplier, ParagraphApplier, TableApplier, HeaderFooterApplier).
 - **ReportManager** – менеджер отчётности, обеспечивающий фильтрацию, группировку и экспорт проблем.
-- **ConfigLoader** – загрузчик и валидатор YAML-конфигурации.
+- **ConfigLoader** – загрузчик и валидатор YAML-конфигурации с поддержкой includes.
 - **StyleManager** – общий модуль управления стилями для ApplyOrchestrator и md_to_docx.
 - **PageManager** – модуль настройки полей страницы, ориентации и колонтитулов.
 - **DocumentModel** – обёртка над python-docx для удобной работы с документом.
+- **DocumentFormatter** – высокоуровневый API для форматирования документов (config-based и template-based).
+- **TemplateExtractor** – извлечение стилей из DOCX-шаблона в YAML-конфиг.
+- **StyleApplier** – применение стилей из DOCX-шаблона к целевому документу.
+- **ContentProcessor** – валидация и трансформация содержимого документов.
+- **FormatterError** – типизированные ошибки с кодами выхода и контекстными подсказками.
+- **DocxSnapshot** – snapshot-тестирование XML-структуры DOCX.
 
 ### Пакет src/apply/
 После рефакторинга модуль применения исправлений разделён на специализированные подмодули:
@@ -40,6 +53,16 @@
 - **src/apply/header_footer_applier.py** – HeaderFooterApplier для колонтитулов
 - **src/apply/font_applier.py** – FontApplier для шрифтов
 - **src/apply/apply_orchestrator.py** – ApplyOrchestrator, координирующий применение исправлений
+- **src/apply/style_applier.py** – применение стилей из DOCX-шаблона
+
+### Пакет src/core/ (новые модули)
+- **src/core/document_formatter.py** – высокоуровневый API для форматирования документов
+- **src/core/template_extractor.py** – извлечение стилей из DOCX-шаблона в YAML
+- **src/core/content_processor.py** – валидация и трансформация содержимого
+- **src/core/formatter_errors.py** – типизированные ошибки с кодами выхода
+- **src/core/yaml_includes.py** – модульная система подключения YAML-файлов
+- **src/core/snapshot_testing.py** – snapshot-тестирование XML-структуры DOCX
+- **src/core/cli.py** – CLI-интерфейс для форматирования
 
 Такая архитектура повышает модульность, упрощает поддержку и позволяет независимо развивать каждый компонент.
 
@@ -149,30 +172,85 @@ headers_footers:
 - **Поиск в документе** – выберите проблему в таблице и нажмите «🔍 Найти в документе» – откроется копия документа с выделением только этой ошибки.
 - **Импорт из Markdown** – кнопка «Импорт из Markdown» позволяет сконвертировать Markdown-файл в DOCX с применением стилей по ГОСТ и автоматически загрузить его в интерфейс.
 - **Настройка допусков** – кнопка «⚙ Настройки» открывает окно настройки допусков (в миллиметрах, пунктах и twips) для аудита.
+- **Редактор конфигураций** – кнопка «Открыть для редактирования» открывает визуальный редактор YAML-конфигураций с деревом секций, типизированными виджетами и предпросмотром стилей. Подробности см. в [Руководстве пользователя](docs/user_guides/USER_GUIDE.md#9-редактор-конфигураций-версия-120).
 
 ### Командная строка
 
-Помимо GUI, доступны утилиты для пакетной обработки:
+CLI-интерфейс для форматирования документов:
 
-- **Аудит документа** (через модуль core):
-  ```bash
-  python -m src.core.audit_engine --config configs/active/config.yaml --doc document.docx --output report.txt
-  ```
+```bash
+# Форматирование по конфигу
+python -m src.core.cli format -i input.docx -o output.docx -c configs/active/config.yaml
 
-- **Применение исправлений через ApplyOrchestrator** (используйте Python-скрипт):
-  ```python
-  from src.apply.apply_orchestrator import ApplyOrchestrator
-  from src.core.config_loader import ConfigLoader
-  
-  loader = ConfigLoader("configs/active/config.yaml")
-  engine = ApplyOrchestrator(loader)
-  stats = engine.apply_fixes("document.docx", issues, "document_fixed.docx")
-  ```
+# Форматирование по шаблону
+python -m src.core.cli format -i input.docx -o output.docx -t "НТД 01-2013 Текстовая часть_4ред.docx"
 
-- **Конвертация Markdown в DOCX**:
-  ```bash
-  python md_to_docx.py --config configs/active/config.yaml --input document.md --output document.docx
-  ```
+# Форматирование с аудитом (итеративное)
+python -m src.core.cli audit -i input.docx -o output.docx -c configs/active/config.yaml
+
+# Извлечение конфига из шаблона
+python -m src.core.cli extract -t template.docx -o config.yaml
+
+# Сравнение с шаблоном
+python -m src.core.cli diff -i input.docx -t template.docx
+
+# Пакетная обработка
+python -m src.core.cli batch -id input_dir/ -od output_dir/ -c configs/active/config.yaml
+```
+
+### Программный интерфейс
+
+```python
+from src.core.document_formatter import DocumentFormatter
+
+# Форматирование по конфигу
+formatter = DocumentFormatter(config_path='configs/active/config.yaml')
+result = formatter.format_document('input.docx', 'output.docx')
+
+# Форматирование по шаблону
+formatter = DocumentFormatter(template_path='template.docx')
+result = formatter.format_document('input.docx', 'output.docx')
+
+# Полный цикл: аудит + исправление + валидация
+result = formatter.format_with_audit('input.docx', 'output.docx')
+```
+
+### Извлечение стилей из шаблона
+
+```bash
+python -m src.core.template_extractor --template template.docx --output config.yaml
+```
+
+```python
+from src.core.template_extractor import TemplateExtractor
+
+extractor = TemplateExtractor("template.docx")
+config = extractor.extract()
+extractor.save_yaml("config.yaml", config)
+```
+
+### Применение шаблона к документу
+
+```python
+from src.apply.style_applier import StyleApplier
+
+applier = StyleApplier("template.docx")
+applier.apply("target.docx", "output.docx")
+```
+
+### Модульная система includes
+
+```yaml
+# configs/main.yaml
+includes:
+  - includes/base_styles.yaml
+  - includes/page_setup_gost.yaml
+
+styles:
+  Normal:
+    font:
+      size: 14  # переопределяет значение из base_styles.yaml
+```
 
 ## Структура проекта
 
@@ -184,34 +262,26 @@ Formatter_modification/
 ├── md_to_docx.py             # Конвертер Markdown → DOCX
 ├── requirements.txt          # Зависимости
 ├── configs/                  # Конфигурационные файлы
-│   └── active/
-│       ├── config.yaml
-│       ├── config_v3.2.yaml
-│       └── config_v4.2.yaml
+│   ├── active/
+│   │   ├── config.yaml
+│   │   ├── config_v3.2.yaml
+│   │   └── config_v4.2.yaml
+│   └── includes/             # Модульные конфиги (includes)
+│       ├── base_styles.yaml
+│       ├── page_setup_gost.yaml
+│       └── main_config.yaml
 ├── docs/                     # Документация
 │   ├── architecture/
 │   ├── general/
 │   ├── reports/
 │   └── user_guides/
 ├── scripts/                  # Вспомогательные скрипты
-│   ├── analysis/             # Анализ результатов аудита и стабилизации
-│   │   ├── analyze_remaining_issues.py
-│   │   ├── analyze_remaining_paragraph_issues.py
-│   │   └── analyze_stabilization.py
-│   ├── debug/                # Отладка и диагностика
-│   │   ├── debug_config.py
-│   │   ├── debug_location_analysis.py
-│   │   └── debug_location_details.py
-│   ├── demo/                 # Демонстрационные скрипты
-│   │   └── demo_table_fix.py
-│   ├── diagnostics/          # Диагностика документов
-│   │   ├── check_page_breaks_detailed.py
-│   │   └── check_table_margins2.py
-│   └── refactoring/          # Рефакторинг и обновление кода
-│       └── update_imports.py
+│   ├── analysis/
+│   ├── debug/
+│   ├── demo/
+│   ├── diagnostics/
+│   └── refactoring/
 ├── data/                     # Данные и результаты
-│   ├── analysis/             # Результаты анализа
-│   └── test_results/         # Результаты тестирования
 ├── src/                      # Исходный код
 │   ├── apply/                # Модули применения стилей
 │   │   ├── __init__.py
@@ -220,6 +290,7 @@ Formatter_modification/
 │   │   ├── font_applier.py
 │   │   ├── header_footer_applier.py
 │   │   ├── paragraph_applier.py
+│   │   ├── style_applier.py       # НОВЫЙ: применение из шаблона
 │   │   └── table_applier.py
 │   ├── audit/                # Модули аудита
 │   │   ├── __init__.py
@@ -229,41 +300,31 @@ Formatter_modification/
 │   ├── core/                 # Основные утилиты
 │   │   ├── __init__.py
 │   │   ├── audit_engine.py
+│   │   ├── cli.py                  # НОВЫЙ: CLI-интерфейс
 │   │   ├── config_loader.py
+│   │   ├── content_processor.py    # НОВЫЙ: обработка контента
+│   │   ├── document_formatter.py   # НОВЫЙ: высокоуровневый API
 │   │   ├── document_model.py
 │   │   ├── docx_utils.py
+│   │   ├── formatter_errors.py     # НОВЫЙ: типизированные ошибки
 │   │   ├── highlight_engine.py
 │   │   ├── main_controller.py
 │   │   ├── optimized_application.py
 │   │   ├── page_manager.py
 │   │   ├── report_manager.py
-│   │   └── style_manager.py
-│   └── gui/                  # Графический интерфейс (заглушка)
-│       └── __init__.py
+│   │   ├── snapshot_testing.py     # НОВЫЙ: snapshot-тесты
+│   │   ├── style_manager.py
+│   │   ├── template_extractor.py   # НОВЫЙ: извлечение из шаблона
+│   │   └── yaml_includes.py        # НОВЫЙ: модульные includes
+│   ├── config_editor/        # Визуальный редактор конфигураций
+│   └── gui/                  # Графический интерфейс
 └── tests/                    # Тесты
-    ├── unit/                 # Модульные тесты
-    │   ├── test_100_percent_efficiency.py
-    │   ├── test_apply_engine_enhanced.py
-    │   ├── test_apply.py
-    │   ├── test_audit.py
-    │   ├── test_complete_fix_cycle.py
-    │   ├── test_conversion_logic.py
-    │   ├── test_fix_header_footer.py
-    │   ├── test_full_cycle_with_tables.py
-    │   ├── test_get_paragraph.py
-    │   ├── test_gui_launch.py
-    │   ├── test_highlight_button.py
-    │   ├── test_integration_main_controller.py
-    │   ├── test_main_controller.py
-    │   ├── test_preview_logic.py
-    │   ├── test_preview.py
-    │   ├── test_real_document_fix.py
-    │   ├── test_regression_header_footer.py
-    │   ├── test_repeat_audit.py
-    │   ├── test_table_support.py
-    │   └── test_tolerance_units.py
-    └── stress/               # Стресс-тесты
-        └── stress_test_edge_cases.py
+    ├── unit/
+    │   ├── test_docx_snapshots.py  # НОВЫЙ: snapshot-тесты
+    │   └── ... (остальные тесты)
+    ├── snapshots/            # НОВЫЙ: эталонные снимки
+    │   └── *.snapshot
+    └── stress/
 ```
 
 **Ключевые изменения после рефакторинга:**
@@ -280,28 +341,68 @@ Formatter_modification/
 Для запуска тестов используйте pytest. Все модульные тесты расположены в директории `tests/unit/`:
 
 ```bash
-# Запуск всех тестов
-pytest tests/unit/
+# Запуск всех тестов (60 тестов)
+pytest tests/
 
-# Или запуск конкретных тестов
-pytest tests/unit/test_audit.py
+# Запуск snapshot-тестов
+pytest tests/unit/test_docx_snapshots.py
+
+# Обновление snapshot-эталонов
+UPDATE_SNAPSHOTS=1 pytest tests/unit/test_docx_snapshots.py
+
+# Запуск конкретных тестов
 pytest tests/unit/test_table_support.py
 pytest tests/unit/test_regression_header_footer.py
 pytest tests/unit/test_main_controller.py
-pytest tests/unit/test_apply_engine_enhanced.py
-pytest tests/unit/test_fix_header_footer.py
-pytest tests/unit/test_real_document_fix.py
-pytest tests/unit/test_full_cycle_with_tables.py
-pytest tests/unit/test_complete_fix_cycle.py
-pytest tests/unit/test_100_percent_efficiency.py
-pytest tests/stress/stress_test_edge_cases.py
 ```
 
-Все тесты проходят успешно, подтверждая корректность работы модулей аудита и применения исправлений после рефакторинга.
+### Snapshot-тесты
 
-> **Примечание:** Некоторые тесты требуют наличия файлов конфигурации в корне проекта. Используйте `pytest tests/unit/test_main_controller.py tests/unit/test_table_support.py` для запуска критических тестов.
+Сравнивают XML-структуру сгенерированных DOCX с эталонными снимками:
+
+```bash
+# Первый запуск — создание снимков
+UPDATE_SNAPSHOTS=1 pytest tests/unit/test_docx_snapshots.py
+
+# Обычный запуск — сравнение с эталоном
+pytest tests/unit/test_docx_snapshots.py
+```
+
+Снимки хранятся в `tests/snapshots/` и нормализуются (удаляются UUID, timestamps).
 
 ## Статус проекта
+
+### ✅ Template-based форматирование и CLI (2026-06-26)
+Реализована система форматирования на основе DOCX-шаблонов по аналогии с Pandoc `--reference-doc`:
+
+#### Новые модули
+- **TemplateExtractor** (`src/core/template_extractor.py`) – извлечение стилей, настроек страницы и колонтитулов из DOCX-шаблона в YAML-конфиг
+- **StyleApplier** (`src/apply/style_applier.py`) – применение стилей из DOCX-шаблона к целевому документу (копирование стилей, страницы, колонтитулов)
+- **ContentProcessor** (`src/core/content_processor.py`) – валидация и трансформация содержимого (регистр, пробелы, знаки препинания)
+- **DocumentFormatter** (`src/core/document_formatter.py`) – высокоуровневый API, объединяющий все модули
+- **FormatterError** (`src/core/formatter_errors.py`) – типизированные ошибки с 30+ типами и уникальными exit codes
+- **YAML Includes** (`src/core/yaml_includes.py`) – модульная система подключения YAML-файлов с deep merge
+- **Snapshot Testing** (`src/core/snapshot_testing.py`) – сравнение XML-структуры DOCX с эталонными снимками
+- **CLI** (`src/core/cli.py`) – полный набор команд: format, audit, extract, diff, batch
+
+#### Обновления GUI
+- Поле выбора шаблона (reference document)
+- Кнопка «Применить шаблон» – копирование стилей из DOCX
+- Кнопка «Извлечь конфиг» – генерация YAML из DOCX
+
+#### Тесты
+- 60/60 тестов проходят
+- Snapshot-тесты XML-структуры DOCX (9 тестов)
+- Защита от циклических includes
+
+### ✅ Визуальный редактор конфигураций (2026-06-13)
+Реализован визуальный редактор YAML-конфигураций (`src/config_editor/`) с 8 модулями:
+- Дерево конфига с навигацией по секциям и стилям
+- Типизированные виджеты (чекбоксы, комбобоксы, поля ввода, выбор цвета)
+- Предпросмотр стиля на Canvas
+- Валидация значений
+- Интеграция с основным GUI
+- Обновлена portable EXE-сборка
 
 ### ✅ Исправление ошибок аудита (2026-06-12)
 - Исправлено определение имени шрифта: `w:rFonts` — дочерний элемент `w:rPr`, не атрибут `w:r` (`.find()` вместо `.get()`)

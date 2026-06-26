@@ -1,0 +1,95 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+formatter.log
+*.log
+*.docx
+*.json
+*.ico
+*.spec
+outputs/
+*.coverage
+*.pyc
+*.pyo
+*.pyd
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# Build artifacts
+build/
+dist/
+gui_formatter.spec
+feather.ico
+
+# Test outputs
+test_output*.docx
+test_*.docx
+test_*.json
+test_*.md
+
+# Р”РѕРєСѓРјРµРЅС‚С‹ РґР»СЏ РѕР±СЂР°Р±РѕС‚РєРё (РїСЂРёРјРµСЂС‹)
+(Р“Р•РќР•Р РђР¦РРЇ)*.docx
+(Р“Р•РќР•Р РђР¦РРЇ)*.md
+РўРѕРј*.docx

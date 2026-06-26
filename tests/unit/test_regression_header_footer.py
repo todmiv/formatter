@@ -17,6 +17,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from src.core.config_loader import ConfigLoader
 from src.core.audit_engine import AuditEngine, AuditIssue, Severity
+from src.core.formatter_errors import FormatterError
 from src.apply.apply_orchestrator import ApplyOrchestrator
 import docx
 
@@ -77,7 +78,7 @@ class TestHeaderFooterRegression(unittest.TestCase):
         doc.add_paragraph("Второй параграф.")
         
         # Сохраняем
-        cls.test_doc_path = "test_document_with_headers.docx"
+        cls.test_doc_path = "tests/test_document_with_headers.docx"
         doc.save(cls.test_doc_path)
         logger.info(f"Создан тестовый документ: {cls.test_doc_path}")
     
@@ -328,7 +329,7 @@ class TestHeaderFooterRegression(unittest.TestCase):
                     
                     logger.info(f"    Успешно: найден параграф в контейнере {container}")
                 
-                except (ValueError, IndexError, KeyError) as e:
+                except (ValueError, IndexError, KeyError, FormatterError) as e:
                     # Для некоторых тестовых location параграф может не существовать
                     # (например, section 0, paragraph 0 может отсутствовать)
                     # Это допустимо, если location некорректен для данного документа

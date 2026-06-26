@@ -1,0 +1,41 @@
+# Настройки страницы по ГОСТ Р 21.101-2020
+# Этот файл подключается через includes
+
+page_setup:
+  portrait:
+    left_margin_cm: 3.0
+    right_margin_cm: 1.5
+    top_margin_cm: 2.0
+    bottom_margin_cm: 2.0
+
+  landscape:
+    left_margin_cm: 2.0
+    right_margin_cm: 2.0
+    top_margin_cm: 2.5
+    bottom_margin_cm: 1.0
+
+  paper_size: "A4"
+  orientation_default: "portrait"
+
+headers_footers:
+  header:
+    enabled: true
+    position_from_edge_cm: 1.0
+    content: "page_number"
+    alignment: "right"
+    font_size_min: 12
+    font_size_max: 14
+    arabic_numerals: true
+    no_page_word: true
+    no_punctuation: true
+    continuous_numbering: true
+
+  footer:
+    enabled: true
+    position_from_edge_cm: 1.25
+    content: "section_chapter_number"
+    alignment: "center"
+    style: "uppercase_spaced"
+    bold: true
+    character_spacing: 1.5
+    section_break_independent: true
