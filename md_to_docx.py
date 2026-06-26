@@ -8,6 +8,7 @@
 """
 
 import re
+import os
 import yaml
 import time
 import logging
@@ -26,15 +27,31 @@ from src.core.style_manager import StyleManager
 # Настройка логгера для замеров времени
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 perf_logger = logging.getLogger('perf')
+logger = logging.getLogger(__name__)
 
 
 class RI2013Converter:
     """Конвертер Markdown в DOCX по НТД 01-2013"""
-    
-    def __init__(self, config_path='configs/active/config.yaml'):
-        """Инициализация конвертера с загрузкой конфигурации"""
+
+    # Маппинг стилей из шаблона
+    TEMPLATE_STYLE_MAP = {
+        1: '021216Раздел',      # РАЗДЕЛ
+        2: '021216Глава',       # ГЛАВА
+        3: '021216Подглава',    # подзаголовки
+        4: 'Пункт',             # подпункты
+    }
+
+    def __init__(self, config_path='configs/active/config.yaml', template_path=None):
+        """Инициализация конвертера с загрузкой конфигурации
+
+        Args:
+            config_path: путь к YAML-конфигу
+            template_path: путь к DOCX-шаблону для копирования стилей (опционально)
+        """
         perf_logger.info("--- ИНИЦИАЛИЗАЦИЯ RI2013Converter ---")
-        
+
+        self.template_path = template_path
+
         # Этап 0: Загрузка конфигурации
         t0 = time.perf_counter()
         self.config_loader = ConfigLoader(config_path)
@@ -48,45 +65,41 @@ class RI2013Converter:
             self.config = self.config_loader.get_config()
         t_config = time.perf_counter() - t0
         perf_logger.info(f"[PERF] Загрузка конфигурации: {t_config:.4f} сек")
-        
-        print("[DEBUG] Config keys:", self.config.keys())
-        if 'page_setup' in self.config:
-            print("[DEBUG] page_setup keys:", self.config['page_setup'].keys())
-        
+
         # Создаём менеджер стилей
         if self.config_loader:
             self.style_manager = StyleManager(self.config_loader)
         else:
             self.style_manager = None
-        
+
         # Этап: Создание документа Document()
         t0 = time.perf_counter()
         self.doc = Document()
         t_doc_create = time.perf_counter() - t0
         perf_logger.info(f"[PERF] Document(): {t_doc_create:.4f} сек")
-        
+
         # Регулярное выражение для удаления эмодзи
         self._emoji_pattern = re.compile(
             "["
-            "\U0001F600-\U0001F64F"  # эмоции
-            "\U0001F300-\U0001F5FF"  # символы и пиктограммы
-            "\U0001F680-\U0001F6FF"  # транспорт и карты
-            "\U0001F1E0-\U0001F1FF"  # флаги
-            "\U00002702-\U000027B0"  # дополнительные символы
-            "\U000024C2-\U0001F251"  # прочие
+            "\U0001F600-\U0001F64F"
+            "\U0001F300-\U0001F5FF"
+            "\U0001F680-\U0001F6FF"
+            "\U0001F1E0-\U0001F1FF"
+            "\U00002702-\U000027B0"
+            "\U000024C2-\U0001F251"
             "]+",
             flags=re.UNICODE
         )
-        
-        # Этап: _setup_document() — PageManager + StyleManager
+
+        # Этап: _setup_document() — PageManager + StyleManager + копирование стилей из шаблона
         t0 = time.perf_counter()
         self._setup_document()
         t_setup = time.perf_counter() - t0
         perf_logger.info(f"[PERF] _setup_document (PageManager + StyleManager): {t_setup:.4f} сек")
-        
+
         self._current_section = 0
         self._current_chapter = 0
-        
+
         t_total_init = t_config + t_doc_create + t_setup
         perf_logger.info(f"[PERF] ИТОГО __init__: {t_total_init:.4f} сек")
         perf_logger.info("--- ИНИЦИАЛИЗАЦИЯ ЗАВЕРШЕНА ---")
@@ -256,6 +269,77 @@ class RI2013Converter:
             loader.styles = self.config.get('styles', {})
             sm = StyleManager(loader)
             sm.setup_styles(self.doc)
+
+        # Копирование стилей из DOCX-шаблона (если указан)
+        if self.template_path and os.path.exists(self.template_path):
+            self._copy_styles_from_template()
+
+    def _copy_styles_from_template(self):
+        """Копирует стили из DOCX-шаблона в текущий документ"""
+        perf_logger.info(f"Копирование стилей из шаблона: {self.template_path}")
+        template_doc = Document(self.template_path)
+
+        copied_count = 0
+        for template_style in template_doc.styles:
+            if template_style.type is None:
+                continue
+            try:
+                style_type_name = template_style.type.name
+            except AttributeError:
+                continue
+
+            if style_type_name != 'PARAGRAPH':
+                continue
+
+            style_name = template_style.name
+
+            # Пропускаем стандартные стили
+            if style_name in ('Default Paragraph Font',):
+                continue
+
+            # Создаём или обновляем стиль
+            try:
+                if style_name in self.doc.styles:
+                    target_style = self.doc.styles[style_name]
+                else:
+                    target_style = self.doc.styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
+
+                # Копируем свойства шрифта
+                if template_style.font:
+                    if template_style.font.name:
+                        target_style.font.name = template_style.font.name
+                    if template_style.font.size:
+                        target_style.font.size = template_style.font.size
+                    if template_style.font.bold is not None:
+                        target_style.font.bold = template_style.font.bold
+                    if template_style.font.italic is not None:
+                        target_style.font.italic = template_style.font.italic
+
+                # Копируем свойства абзаца
+                if template_style.paragraph_format:
+                    pf = template_style.paragraph_format
+                    if pf.alignment is not None:
+                        target_style.paragraph_format.alignment = pf.alignment
+                    if pf.first_line_indent is not None:
+                        target_style.paragraph_format.first_line_indent = pf.first_line_indent
+                    if pf.left_indent is not None:
+                        target_style.paragraph_format.left_indent = pf.left_indent
+                    if pf.space_before is not None:
+                        target_style.paragraph_format.space_before = pf.space_before
+                    if pf.space_after is not None:
+                        target_style.paragraph_format.space_after = pf.space_after
+                    if pf.line_spacing is not None:
+                        target_style.paragraph_format.line_spacing = pf.line_spacing
+                    if pf.page_break_before:
+                        target_style.paragraph_format.page_break_before = True
+
+                copied_count += 1
+                logger.debug(f"Скопирован стиль: {style_name}")
+
+            except Exception as e:
+                logger.warning(f"Не удалось скопировать стиль '{style_name}': {e}")
+
+        perf_logger.info(f"Скопировано стилей из шаблона: {copied_count}")
     
     def convert(self, md_path, docx_path, progress_callback=None):
         """Конвертация Markdown файла в DOCX
@@ -317,6 +401,7 @@ class RI2013Converter:
         i = 0
         table_counter = {'current': 0}
         caption_added = False
+        last_caption_text = ''
         last_logged_percent = 0
         
         while i < total_lines:
@@ -340,18 +425,48 @@ class RI2013Converter:
                 self._add_list_item(line)
                 i += 1
                 continue
-            
+
+            # Автоопределение заголовков по паттернам (если нет markdown-разметки)
+            # РАЗДЕЛ X.
+            if re.match(r'^РАЗДЕЛ\s+\d+', line):
+                caption_added = False
+                self._add_heading(line, level=1)
+                i += 1
+                continue
+
+            # ГЛАВА X.
+            if re.match(r'^ГЛАВА\s+\d+', line):
+                caption_added = False
+                self._add_heading(line, level=2)
+                i += 1
+                continue
+
+            # X.Y Подзаголовок (например "3.1 Анализ...")
+            if re.match(r'^\d+\.\d+\s+[А-Я]', line) and len(line) < 100:
+                caption_added = False
+                self._add_heading(line, level=3)
+                i += 1
+                continue
+
             # Подпись таблицы: **Таблица X.Y.Z** или Таблица X.Y.Z или **Название**
             if re.match(r'^(\*\*)?Таблица\s+\d+', line) or re.match(r'^\*\*Перечень\s+', line):
                 # Извлекаем номер таблицы из подписи (если есть)
                 num_match = re.search(r'Таблица\s+(\d+[\.\d]*)', line)
                 if num_match:
                     existing_num = num_match.group(1)
-                    # Обновляем счётчик на основе существующей нумерации
                     parts = existing_num.split('.')
-                    table_counter['current'] = int(parts[-1])
+                    if len(parts) >= 3:
+                        self._current_section = int(parts[0])
+                        self._current_chapter = int(parts[1])
+                        table_counter['current'] = int(parts[2])
+                    elif len(parts) == 2:
+                        self._current_section = int(parts[0])
+                        table_counter['current'] = int(parts[1])
+                    else:
+                        table_counter['current'] = int(parts[0])
                 self._add_caption(line)
                 caption_added = True
+                last_caption_text = line.strip()
                 i += 1
                 continue
             
@@ -397,12 +512,19 @@ class RI2013Converter:
                 while i < len(lines) and lines[i].strip().startswith('|'):
                     table_lines.append(lines[i].strip())
                     i += 1
-                
+
                 # Проверка на разделительную строку таблицы
                 if len(table_lines) > 1 and re.match(r'^\|[\s\-:|]+\|$', table_lines[1]):
                     table_counter['current'] += 1
-                    self._add_table(table_lines, table_counter, self._current_section, self._current_chapter, skip_caption=caption_added)
+                    # Проверяем, была ли подписана таблица (ищем "Таблица X.Y.Z" перед таблицей)
+                    has_caption = False
+                    for j in range(max(0, start_i - 5), start_i):
+                        if re.match(r'^(\*\*)?Таблица\s+\d+', lines[j].strip()):
+                            has_caption = True
+                            break
+                    self._add_table(table_lines, table_counter, self._current_section, self._current_chapter, skip_caption=has_caption)
                     caption_added = False
+                    last_caption_text = ''
                 else:
                     # Это не таблица, а текст с вертикальными чертами
                     # Возвращаем i на начало и обрабатываем каждую строку как обычный текст
@@ -423,22 +545,46 @@ class RI2013Converter:
                 self._add_table_note(line)
                 i += 1
                 continue
+
+            # Примечание к таблице: "Примечание — ..."
+            elif line.startswith('Примечание'):
+                self._add_table_note(line)
+                i += 1
+                continue
             
             # Обычный текст (п. 2.7.2)
             else:
-                caption_added = False
-                self._add_paragraph(line)
+                # Если предыдущая непустая строка была подписью таблицы — это заголовок таблицы
+                if caption_added and last_caption_text:
+                    # Заголовок таблицы — по центру без отступа
+                    paragraph = self.doc.add_paragraph(style='Normal')
+                    self._add_rich_text(paragraph, line)
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    paragraph.paragraph_format.first_line_indent = Cm(0)
+                    caption_added = False
+                    last_caption_text = ''
+                else:
+                    self._add_paragraph(line)
                 i += 1
                 continue
     
     def _add_heading(self, text, level=1):
         """Добавление заголовка (Таблица 2.1) с поддержкой **bold**"""
-        paragraph = self.doc.add_paragraph(style=f'Heading {level}')
+        # Используем шаблонный стиль если доступен
+        style_name = self.TEMPLATE_STYLE_MAP.get(level, f'Heading {level}')
+
+        # Проверяем существование стиля
+        if style_name in self.doc.styles:
+            paragraph = self.doc.add_paragraph(style=style_name)
+        else:
+            # Fallback на стандартный стиль
+            paragraph = self.doc.add_paragraph(style=f'Heading {level}')
+
         self._add_rich_text(paragraph, text)
-        
+
         if paragraph.text.endswith('.'):
             paragraph.text = paragraph.text[:-1]
-        
+
         if hasattr(self, 'page_manager') and self.page_manager:
             if level == 1:
                 self._current_section += 1
@@ -447,14 +593,18 @@ class RI2013Converter:
             elif level == 2:
                 self._current_chapter += 1
                 self.page_manager.update_footer_text(self.doc, self._current_section, self._current_chapter)
-        
+
         return paragraph
     
     def _add_paragraph(self, text):
         """Добавление абзаца текста (п. 2.7.2) с поддержкой **bold**"""
-        paragraph = self.doc.add_paragraph(style='Normal')
-        paragraph.paragraph_format.line_spacing = 1.15
-        paragraph.paragraph_format.first_line_indent = Cm(1.25)
+        # Используем стиль "Текст доклада" если доступен, иначе Normal
+        if 'Текст доклада' in self.doc.styles:
+            paragraph = self.doc.add_paragraph(style='Текст доклада')
+        else:
+            paragraph = self.doc.add_paragraph(style='Normal')
+            paragraph.paragraph_format.line_spacing = 1.15
+            paragraph.paragraph_format.first_line_indent = Cm(1.25)
         self._add_rich_text(paragraph, text)
         self._disable_hyphenation(paragraph)
         return paragraph
@@ -481,10 +631,16 @@ class RI2013Converter:
                     rFonts.set(qn('w:eastAsia'), 'Times New Roman')
     
     def _add_caption(self, text):
-        """Добавление подписи таблицы/рисунка (п. 2.10.2, 2.11.2)"""
+        """Добавление подписи таблицы/рисунка (п. 2.10.2, 2.11.2)
+        Подпись "Таблица X.Y.Z" выравнивается по правому краю
+        """
         cleaned = self._clean_text(text)
         paragraph = self.doc.add_paragraph(cleaned, style='Caption')
-        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        # Подпись "Таблица X.Y.Z" — по правому краю (п. 2.10.1)
+        if re.match(r'^Таблица\s+\d+', cleaned) or re.match(r'^Рисунок\s+\d+', cleaned):
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        else:
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         if paragraph.text.endswith('.'):
             paragraph.text = paragraph.text[:-1]
         return paragraph
@@ -537,31 +693,7 @@ class RI2013Converter:
         # Вычисление и установка одинаковых ширин колонок для шапки и тела
         self._sync_column_widths(header_table, data)
 
-        # Spacer между шапкой и телом — 0.5 пт
-        spacer = self.doc.add_paragraph()
-        spacer.paragraph_format.space_after = Pt(0)
-        spacer.paragraph_format.space_before = Pt(0)
-        pPr = spacer._element.get_or_add_pPr()
-        spacing = pPr.find(qn('w:spacing'))
-        if spacing is None:
-            spacing = OxmlElement('w:spacing')
-            pPr.append(spacing)
-        spacing.set(qn('w:line'), '10')
-        spacing.set(qn('w:lineRule'), 'exact')
-        spacing.set(qn('w:before'), '0')
-        spacing.set(qn('w:after'), '0')
-        # Маркер: custom style чтобы аудит не трогал этот параграф
-        spacer.style = self.doc.styles['Normal']
-        run = spacer.add_run('')
-        run.font.size = Pt(1)
-        # Прямое форматирование поверх стиля — приоритет
-        pStyle = pPr.find(qn('w:pStyle'))
-        if pStyle is None:
-            pStyle = OxmlElement('w:pStyle')
-            pPr.insert(0, pStyle)
-        pStyle.set(qn('w:val'), 'Normal')
-        
-        # Основная таблица
+        # Основная таблица (без spacer — шапка и тело идут подряд)
         body_start = (numbering_row_idx + 1) if numbering_row_idx is not None else 1
         main_table = self.doc.add_table(rows=len(data) - body_start, cols=len(data[0]))
         main_table.style = 'Table Grid'
@@ -569,9 +701,13 @@ class RI2013Converter:
 
         # Установка одинаковых ширин колонок для тела таблицы
         self._sync_column_widths(main_table, data)
-        
-        # Интервал после таблицы 6 пт (п. 2.10.13)
-        self.doc.add_paragraph().paragraph_format.space_after = Pt(6)
+
+        # Интервал после таблицы 6 пт (п. 2.10.13) — через spacing последней строки
+        if main_table.rows:
+            last_row = main_table.rows[-1]
+            for cell in last_row.cells:
+                for para in cell.paragraphs:
+                    para.paragraph_format.space_after = Pt(6)
     
     def _is_numbering_row(self, row_data):
         """Проверяет, является ли строка строкой нумерации граф (1 | 2 | 3 | ...)"""
@@ -651,7 +787,7 @@ class RI2013Converter:
                 paragraph.paragraph_format.space_after = Pt(0)
                 
                 if header_text:
-                    paragraph.text = header_text.capitalize()
+                    paragraph.text = header_text
                 
                 if paragraph.text.endswith('.'):
                     paragraph.text = paragraph.text[:-1]
@@ -751,11 +887,15 @@ class RI2013Converter:
         num_cols = len(all_data[0])
 
         # Вычисление пропорций на основе длины текста
+        # Ограничиваем максимальную длину строки для расчёта ширины
+        MAX_CHARS_FOR_WIDTH = 25  # максимальная длина строки для расчёта пропорций
         col_widths_chars = [0] * num_cols
         for row in all_data:
             for i, cell in enumerate(row):
                 if i < num_cols:
-                    col_widths_chars[i] = max(col_widths_chars[i], len(cell))
+                    # Ограничиваем длину для расчёта ширины
+                    char_count = min(len(cell), MAX_CHARS_FOR_WIDTH)
+                    col_widths_chars[i] = max(col_widths_chars[i], char_count)
 
         total_chars = sum(col_widths_chars)
         if total_chars == 0:
@@ -764,7 +904,7 @@ class RI2013Converter:
         col_widths_cm = []
         for i in range(num_cols):
             w = (col_widths_chars[i] / total_chars) * usable_width_cm
-            col_widths_cm.append(max(w, 0.5))  # минимум 0.5 см на колонку
+            col_widths_cm.append(max(w, 0.8))  # минимум 0.8 см на колонку
 
         # Пересчитаем суммарно, чтобы точно занять всю ширину
         total_cm = sum(col_widths_cm)
@@ -836,20 +976,26 @@ class RI2013Converter:
             return False
     
     def _add_table_note(self, text):
-        """Добавление примечания к таблице (п. 2.10.14, 2.12)"""
+        """Добавление примечания к таблице (п. 2.10.14, 2.12)
+        Размер шрифта 10 пт (п. 2.12.3)
+        """
         text = self._clean_text(text)
-        paragraph = self.doc.add_paragraph(text, style='Table Note')
-        
+        # С прописной буквы (п. 2.12.2)
+        if text:
+            text = text[0].upper() + text[1:]
+
+        paragraph = self.doc.add_paragraph(style='Table Note')
+
         # Интервал перед примечанием 0 пт (п. 2.10.14, 2.12.4)
         paragraph.paragraph_format.space_before = Pt(0)
-        
+
         # Без абзаца (п. 2.12.2)
         paragraph.paragraph_format.first_line_indent = Cm(0)
-        
-        # С прописной буквы (п. 2.12.2)
-        if paragraph.text:
-            paragraph.text = paragraph.text[0].upper() + paragraph.text[1:]
-        
+
+        # Добавляем run с нужным размером шрифта
+        run = paragraph.add_run(text)
+        run.font.size = Pt(10)
+
         return paragraph
     
     def _add_note(self, text):
