@@ -57,8 +57,6 @@ class DocumentFormatter:
         :param template_path: путь к DOCX-шаблону (для template-based режима).
         :param verbose: подробный вывод.
         """
-        from src.core.formatter_errors import raise_config_not_found, raise_template_not_found
-
         self.config_path = config_path
         self.template_path = template_path
         self.verbose = verbose
@@ -406,7 +404,7 @@ class DocumentFormatter:
 
     def _scan_for_all_issues(self, doc: Document) -> list:
         """Сканирует документ для поиска всех элементов, требующих форматирования."""
-        from src.core.audit_engine import AuditEngine, AuditIssue, Severity
+        from src.core.audit_engine import AuditEngine
 
         if not self.config_loader:
             return []
@@ -515,14 +513,15 @@ def main():
 
     if args.diff:
         result = formatter.diff(args.input, template_path)
-        print(f"\nРасхождения с шаблоном:")
+        print("\nРасхождения с шаблоном:")
         print(f"  Отсутствующие стили: {len(result['missing_styles'])}")
         for name in result['missing_styles']:
             print(f"    - {name}")
         print(f"  Различающиеся стили: {len(result['different_styles'])}")
         for name in result['different_styles']:
             print(f"    - {name}")
-        print(f"  Настройки страницы: {'различаются' if result['page_setup_diff'] else 'совпадают'}")
+        page_status = 'различаются' if result['page_setup_diff'] else 'совпадают'
+        print(f"  Настройки страницы: {page_status}")
         return 0
 
     if args.audit:
@@ -539,7 +538,7 @@ def main():
         )
 
     if result['success']:
-        print(f"\nФорматирование завершено успешно")
+        print("\nФорматирование завершено успешно")
         print(f"  Вход: {result['input']}")
         print(f"  Выход: {result['output']}")
         print(f"  Режим: {result['mode']}")

@@ -25,7 +25,8 @@ import os
 import re
 import zipfile
 import hashlib
-from typing import Dict, Optional
+import contextlib
+from typing import Dict
 from lxml import etree
 
 
@@ -206,10 +207,8 @@ def extract_docx_xml(docx_path: str) -> Dict[str, str]:
     with zipfile.ZipFile(docx_path, 'r') as z:
         for filename in z.namelist():
             if filename.endswith('.xml') or filename.endswith('.rels'):
-                try:
+                with contextlib.suppress(Exception):
                     result[filename] = z.read(filename).decode('utf-8')
-                except Exception:
-                    pass
     return result
 
 
@@ -221,12 +220,14 @@ def get_docx_styles(docx_path: str) -> list:
 
     root = etree.fromstring(xml["word/styles.xml"].encode())
     ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    wml_ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
     styles = []
     for style in root.findall(".//w:style", ns):
-        style_id = style.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}styleId")
+        style_id = style.get(f"{wml_ns}styleId")
         name_elem = style.find("w:name", ns)
-        name = name_elem.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val") if name_elem is not None else style_id
+        name_val = f"{wml_ns}val"
+        name = name_elem.get(name_val) if name_elem is not None else style_id
         styles.append({"id": style_id, "name": name})
 
     return styles

@@ -21,11 +21,9 @@ ContentProcessor - обработка содержимого документо�
 
 import re
 import logging
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List
 from docx import Document
 from docx.text.paragraph import Paragraph
-from docx.table import Table
-from docx.oxml.ns import qn
 
 logger = logging.getLogger(__name__)
 
@@ -148,12 +146,8 @@ class ContentProcessor:
         errors = []
         rules = self.formatting_rules.get('headings', {})
 
-        if rules.get('no_period_at_end', False):
-            if text.rstrip().endswith('.'):
-                errors.append("В конце заголовка не должна ставиться точка")
-
-        if rules.get('no_bold', False):
-            pass
+        if rules.get('no_period_at_end', False) and text.rstrip().endswith('.'):
+            errors.append("В конце заголовка не должна ставиться точка")
 
         return errors
 
@@ -168,16 +162,11 @@ class ContentProcessor:
         tables_rules = self.formatting_rules.get('tables', {})
         title_rules = tables_rules.get('title', {})
 
-        if title_rules.get('no_period_at_end', False):
-            if text.rstrip().endswith('.'):
-                errors.append("В конце названия таблицы не ставится точка")
+        if title_rules.get('no_period_at_end', False) and text.rstrip().endswith('.'):
+            errors.append("В конце названия таблицы не ставится точка")
 
-        if title_rules.get('no_abbreviations', False):
-            if self._contains_abbreviation(text):
-                errors.append("В названии таблицы не допускаются сокращения")
-
-        if title_rules.get('alignment', 'center') == 'center':
-            pass
+        if title_rules.get('no_abbreviations', False) and self._contains_abbreviation(text):
+            errors.append("В названии таблицы не допускаются сокращения")
 
         return errors
 
@@ -206,7 +195,6 @@ class ContentProcessor:
     def _validate_paragraphs(self, doc: Document) -> List[Dict[str, Any]]:
         """Валидирует параграфы документа."""
         issues = []
-        prohibited = self.formatting_rules.get('prohibited', [])
         math_symbols = self.formatting_rules.get('math_symbols_require_numbers', [])
 
         for idx, para in enumerate(doc.paragraphs):
@@ -299,9 +287,9 @@ class ContentProcessor:
         """Валидирует содержимое таблиц."""
         issues = []
 
-        for table_idx, table in enumerate(doc.tables):
-            for row_idx, row in enumerate(table.rows):
-                for col_idx, cell in enumerate(row.cells):
+        for _table_idx, table in enumerate(doc.tables):
+            for _row_idx, row in enumerate(table.rows):
+                for _col_idx, cell in enumerate(row.cells):
                     for para in cell.paragraphs:
                         text = para.text.strip()
                         if not text:
@@ -352,16 +340,11 @@ class ContentProcessor:
     def _is_sequential_numbering(self, numbers: List[str]) -> bool:
         """Проверяет последовательность нумерации."""
         try:
-            parsed = []
-            for num in numbers:
-                parts = [int(p) for p in num.split('.')]
-                parsed.append(parts)
-
-            for i in range(1, len(parsed)):
-                if parsed[i] != parsed[i-1][:-1] + [parsed[i-1][-1] + 1]:
-                    return False
-
-            return True
+            parsed = [[int(p) for p in num.split('.')] for num in numbers]
+            return all(
+                parsed[i] == parsed[i-1][:-1] + [parsed[i-1][-1] + 1]
+                for i in range(1, len(parsed))
+            )
         except (ValueError, IndexError):
             return True
 

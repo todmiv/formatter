@@ -18,13 +18,12 @@ import os
 import copy
 import logging
 import argparse
-from typing import Dict, Any, Optional, List, Tuple
+import contextlib
+from typing import Dict, Any, Optional, List
 from docx import Document
-from docx.shared import Pt, Cm, RGBColor
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from docx.enum.style import WD_STYLE_TYPE
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 logger = logging.getLogger(__name__)
 
@@ -175,23 +174,14 @@ class StyleApplier:
 
     def _ensure_style_exists(self, target_doc, style_name: str, template_style):
         """Обеспечивает наличие стиля в целевом документе."""
-        try:
+        with contextlib.suppress(KeyError):
             return target_doc.styles[style_name]
-        except KeyError:
-            pass
 
-        try:
-            new_style = target_doc.styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
-        except Exception:
-            new_style = target_doc.styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
+        new_style = target_doc.styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
 
-        base_name = 'Normal'
-        if 'Обычный' in target_doc.styles:
-            base_name = 'Обычный'
-        try:
+        base_name = 'Обычный' if 'Обычный' in target_doc.styles else 'Normal'
+        with contextlib.suppress(Exception):
             new_style.base_style = target_doc.styles[base_name]
-        except Exception:
-            pass
 
         return new_style
 
@@ -270,8 +260,6 @@ class StyleApplier:
         if not self._template_doc.sections:
             return False
 
-        template_section = self._template_doc.sections[0]
-
         for i, target_section in enumerate(target_doc.sections):
             if i > 0 and len(self._template_doc.sections) <= 1:
                 break
@@ -303,8 +291,6 @@ class StyleApplier:
         """Копирует колонтитулы из шаблона в целевой документ."""
         if not self._template_doc.sections:
             return False
-
-        template_section = self._template_doc.sections[0]
 
         for i, target_section in enumerate(target_doc.sections):
             if i > 0 and len(self._template_doc.sections) <= 1:

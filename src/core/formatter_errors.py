@@ -19,8 +19,8 @@ FormatterError — типизированные ошибки с кодами в�
 """
 
 import sys
-from enum import IntEnum, Enum
-from typing import Optional, Any
+from enum import IntEnum
+from typing import Optional
 
 
 class ErrorKind(IntEnum):
@@ -77,41 +77,67 @@ class FormatterError(Exception):
     """
 
     HINTS = {
-        ErrorKind.FILE_NOT_FOUND: "Убедитесь, что путь указан верно и файл существует. Используйте --verbose для диагностики.",
-        ErrorKind.FILE_READ_ERROR: "Проверьте права доступа к файлу и не повреждён ли он.",
-        ErrorKind.FILE_WRITE_ERROR: "Проверьте права доступа к директории назначения. Директория может не существовать.",
+        ErrorKind.FILE_NOT_FOUND:
+            "Убедитесь, что путь указан верно и файл существует.",
+        ErrorKind.FILE_READ_ERROR:
+            "Проверьте права доступа к файлу и не повреждён ли он.",
+        ErrorKind.FILE_WRITE_ERROR:
+            "Проверьте права доступа к директории назначения.",
 
-        ErrorKind.CONFIG_NOT_FOUND: "Укажите путь к конфигу через -c/--config или используйте configs/active/config.yaml.",
-        ErrorKind.CONFIG_PARSE_ERROR: "Проверьте синтаксис YAML/JSON. Используйте YAML-валидатор для диагностики.",
-        ErrorKind.CONFIG_MISSING_KEY: "Добавьте недостающий раздел в конфиг. Пример: см. configs/active/config.yaml.",
-        ErrorKind.CONFIG_INVALID_VALUE: "Проверьте тип значения в конфиге. Ожидается число, строка или булево значение.",
+        ErrorKind.CONFIG_NOT_FOUND:
+            "Укажите путь к конфигу через -c/--config.",
+        ErrorKind.CONFIG_PARSE_ERROR:
+            "Проверьте синтаксис YAML/JSON.",
+        ErrorKind.CONFIG_MISSING_KEY:
+            "Добавьте недостающий раздел в конфиг.",
+        ErrorKind.CONFIG_INVALID_VALUE:
+            "Проверьте тип значения в конфиге.",
 
-        ErrorKind.TEMPLATE_NOT_FOUND: "Укажите путь к DOCX-шаблону через -t/--template. См. docs/user_guides/USER_GUIDE.md.",
-        ErrorKind.TEMPLATE_EXTRACT_ERROR: "Убедитесь, что DOCX-шаблон не повреждён и содержит стили.",
-        ErrorKind.TEMPLATE_APPLY_ERROR: "Шаблон может содержать несовместимые стили. Проверьте целевой документ.",
+        ErrorKind.TEMPLATE_NOT_FOUND:
+            "Укажите путь к DOCX-шаблону через -t/--template.",
+        ErrorKind.TEMPLATE_EXTRACT_ERROR:
+            "Убедитесь, что DOCX-шаблон не повреждён и содержит стили.",
+        ErrorKind.TEMPLATE_APPLY_ERROR:
+            "Шаблон может содержать несовместимые стили.",
 
-        ErrorKind.DOCX_OPEN_ERROR: "Файл может быть повреждён, зашифрован или открыт в другом приложении.",
-        ErrorKind.DOCX_INVALID: "Файл не является валидным DOCX. Проверьте расширение и формат.",
-        ErrorKind.DOCX_SECTION_ERROR: "Документ не содержит секций. Возможно, повреждена структура XML.",
+        ErrorKind.DOCX_OPEN_ERROR:
+            "Файл может быть повреждён, зашифрован или открыт в другом приложении.",
+        ErrorKind.DOCX_INVALID:
+            "Файл не является валидным DOCX. Проверьте расширение и формат.",
+        ErrorKind.DOCX_SECTION_ERROR:
+            "Документ не содержит секций. Возможно, повреждена структура XML.",
 
-        ErrorKind.STYLE_NOT_FOUND: "Стиль отсутствует в документе. Используйте initialize_styles для его создания.",
-        ErrorKind.STYLE_CREATE_ERROR: "Не удалось создать стиль. Проверьте, не является ли имя зарезервированным.",
-        ErrorKind.STYLE_APPLY_ERROR: "Не удалось применить стиль к элементу. Возможно, стиль несовместим с типом элемента.",
+        ErrorKind.STYLE_NOT_FOUND:
+            "Стиль отсутствует. Используйте initialize_styles для его создания.",
+        ErrorKind.STYLE_CREATE_ERROR:
+            "Не удалось создать стиль. Проверьте имя.",
+        ErrorKind.STYLE_APPLY_ERROR:
+            "Не удалось применить стиль к элементу.",
 
-        ErrorKind.PARAGRAPH_INDEX_ERROR: "Индекс параграфа вне диапазона. Проверьте структуру документа через --verbose.",
-        ErrorKind.TABLE_INDEX_ERROR: "Индекс таблицы вне диапазона. Проверьте количество таблиц в документе.",
-        ErrorKind.HEADER_FOOTER_ERROR: "Ошибка доступа к колонтитулу. Убедитесь, что секция существует.",
-        ErrorKind.LOCATION_INVALID: "Формат location не распознан. Допустимые ключи: index, paragraph_index, section, container.",
+        ErrorKind.PARAGRAPH_INDEX_ERROR:
+            "Индекс параграфа вне диапазона.",
+        ErrorKind.TABLE_INDEX_ERROR:
+            "Индекс таблицы вне диапазона.",
+        ErrorKind.HEADER_FOOTER_ERROR:
+            "Ошибка доступа к колонтитулу.",
+        ErrorKind.LOCATION_INVALID:
+            "Формат location не распознан.",
 
-        ErrorKind.AUDIT_ERROR: "Ошибка при сканировании документа. Проверьте логи для деталей.",
-        ErrorKind.APPLY_ERROR: "Ошибка при применении исправлений. Возможно, документ повреждён.",
+        ErrorKind.AUDIT_ERROR:
+            "Ошибка при сканировании документа.",
+        ErrorKind.APPLY_ERROR:
+            "Ошибка при применении исправлений.",
 
-        ErrorKind.CONTENT_VALIDATION_ERROR: "Найдены нарушения правил форматирования. Используйте detail() для просмотра.",
-        ErrorKind.CONTENT_TRANSFORM_ERROR: "Ошибка при трансформации текста. Проверьте правила в конфиге.",
+        ErrorKind.CONTENT_VALIDATION_ERROR:
+            "Найдены нарушения правил форматирования.",
+        ErrorKind.CONTENT_TRANSFORM_ERROR:
+            "Ошибка при трансформации текста.",
 
-        ErrorKind.BATCH_PARTIAL_FAILURE: "Не все документы обработаны успешно. Проверьте логи для деталей.",
+        ErrorKind.BATCH_PARTIAL_FAILURE:
+            "Не все документы обработаны успешно.",
 
-        ErrorKind.INTERNAL_ERROR: "Внутренняя ошибка. Создайте issue: https://github.com/your-repo/issues",
+        ErrorKind.INTERNAL_ERROR:
+            "Внутренняя ошибка. Создайте issue.",
     }
 
     def __init__(
