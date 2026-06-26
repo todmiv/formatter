@@ -341,8 +341,15 @@ class RI2013Converter:
                 i += 1
                 continue
             
-            # Подпись таблицы: **Таблица X.Y.Z** или **Название**
-            if re.match(r'^\*\*Таблица\s+\d+', line) or re.match(r'^\*\*Перечень\s+', line):
+            # Подпись таблицы: **Таблица X.Y.Z** или Таблица X.Y.Z или **Название**
+            if re.match(r'^(\*\*)?Таблица\s+\d+', line) or re.match(r'^\*\*Перечень\s+', line):
+                # Извлекаем номер таблицы из подписи (если есть)
+                num_match = re.search(r'Таблица\s+(\d+[\.\d]*)', line)
+                if num_match:
+                    existing_num = num_match.group(1)
+                    # Обновляем счётчик на основе существующей нумерации
+                    parts = existing_num.split('.')
+                    table_counter['current'] = int(parts[-1])
                 self._add_caption(line)
                 caption_added = True
                 i += 1
