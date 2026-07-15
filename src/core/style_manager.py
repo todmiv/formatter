@@ -63,6 +63,9 @@ class StyleManager:
                 else:
                     style = doc.styles[style_name]
                 self.apply_style_settings(style, styles_config[style_name])
+            elif style_name not in doc.styles:
+                # Создаём стиль с настройками по умолчанию, даже если его нет в конфиге
+                doc.styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
         perf_logger.info(f"[PERF] StyleManager: Additional styles ({len(additional_styles)}): {time.perf_counter() - t1:.4f} сек")
 
         t_total = time.perf_counter() - t0
@@ -133,6 +136,30 @@ class StyleManager:
         if 'no_period_at_end' in config:
             style.no_period_at_end = config['no_period_at_end']
 
+    @staticmethod
+    def _find_existing_base_style(styles) -> str:
+        """Находит существующий базовый стиль в документе для создания нового."""
+        for name in ('Normal', 'Обычный'):
+            try:
+                _ = styles[name]
+                return name
+            except KeyError:
+                continue
+        # Нет ни Normal, ни Обычный — берём первый доступный непользовательский стиль
+        for style in styles:
+            if style.type == WD_STYLE_TYPE.PARAGRAPH and not style.builtin:
+                return style.name
+        # Последний шанс: создаём Normal «с нуля»
+        try:
+            styles.add_style('Normal', WD_STYLE_TYPE.PARAGRAPH)
+            return 'Normal'
+        except Exception:
+            # Абсолютный fallback: берём любой параграфный стиль
+            for style in styles:
+                if style.type == WD_STYLE_TYPE.PARAGRAPH:
+                    return style.name
+        raise RuntimeError("В документе нет ни одного параграфного стиля")
+
     def ensure_style_exists(self, doc, style_name: str, config: Optional[Dict] = None, cache: Dict = None):
         """
         Гарантирует наличие стиля в документе. Если стиля нет - создаёт.
@@ -150,14 +177,10 @@ class StyleManager:
         try:
             target_style = styles[style_name]
         except KeyError:
-            # Стиль не найден, создаём новый
-            base_style_name = 'Normal'
-            if 'Обычный' in styles:
-                base_style_name = 'Обычный'
-            try:
-                base_style = styles[base_style_name]
-            except KeyError:
-                base_style = styles['Normal']
+            # Стиль не найден, создаём новый.
+            # Сначала убеждаемся, что базовый стиль существует.
+            base_style_name = self._find_existing_base_style(styles)
+            base_style = styles[base_style_name]
 
             target_style = styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
             target_style.base_style = base_style

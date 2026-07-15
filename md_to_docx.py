@@ -33,14 +33,6 @@ logger = logging.getLogger(__name__)
 class RI2013Converter:
     """Конвертер Markdown в DOCX по НТД 01-2013"""
 
-    # Маппинг стилей из шаблона
-    TEMPLATE_STYLE_MAP = {
-        1: '021216Раздел',      # РАЗДЕЛ
-        2: '021216Глава',       # ГЛАВА
-        3: '021216Подглава',    # подзаголовки
-        4: 'Пункт',             # подпункты
-    }
-
     def __init__(self, config_path='configs/active/config.yaml', template_path=None):
         """Инициализация конвертера с загрузкой конфигурации
 
@@ -100,10 +92,93 @@ class RI2013Converter:
         self._current_section = 0
         self._current_chapter = 0
 
+        # Инициализация маппинга типов контента -> имена стилей из конфига
+        self._init_style_map()
+
         t_total_init = t_config + t_doc_create + t_setup
         perf_logger.info(f"[PERF] ИТОГО __init__: {t_total_init:.4f} сек")
         perf_logger.info("--- ИНИЦИАЛИЗАЦИЯ ЗАВЕРШЕНА ---")
         
+    def _init_style_map(self):
+        """Инициализирует маппинг типов контента -> имена стилей из конфига.
+        
+        Читает секцию content_type_styles из конфига. Если секция отсутствует,
+        строит маппинг по умолчанию из detection_rules и стандартных имён.
+        """
+        # Дефолтный маппинг на случай отсутствия секции в конфиге
+        self._style_map = {
+            'heading_1': 'Heading 1',
+            'heading_2': 'Heading 2',
+            'heading_3': 'Heading 3',
+            'heading_4': 'Heading 4',
+            'paragraph': 'Normal',
+            'caption': 'Caption',
+            'table_name': 'Caption',
+            'table_note': 'Table Note',
+            'table_grid': 'Table Grid',
+            'list': 'List Paragraph',
+            'note': 'Note',
+        }
+        
+        # Если есть секция content_type_styles — используем её
+        content_type_styles = self.config.get('content_type_styles', {})
+        if content_type_styles:
+            self._style_map.update(content_type_styles)
+        
+        # Если есть detection_rules — дополним маппинг заголовков
+        detection_rules = self.config.get('detection_rules', {})
+        if detection_rules:
+            # Ищем стили для заголовков по паттернам
+            for style_name, patterns in detection_rules.items():
+                if not patterns:
+                    continue
+                for pattern in patterns:
+                    if re.match(r'^\^?РАЗДЕЛ', pattern):
+                        self._style_map.setdefault('heading_1', style_name)
+                    elif re.match(r'^\^?ГЛАВА', pattern):
+                        self._style_map.setdefault('heading_2', style_name)
+                    elif re.match(r'^\^?\d+\\\.\d+', pattern) or re.match(r'^\^?\d+\.\d+', pattern):
+                        self._style_map.setdefault('heading_3', style_name)
+        
+        logger.debug(f"Style map: {self._style_map}")
+
+    def _resolve_style(self, content_type: str, fallback: str = None) -> str:
+        """Резолвит имя стиля по типу контента из конфига.
+        
+        Args:
+            content_type: тип контента ('heading_1', 'paragraph', 'caption', и т.д.)
+            fallback: имя стиля по умолчанию, если тип не найден в маппинге
+        
+        Returns:
+            Имя стиля для использования в doc.add_paragraph(style=...)
+        """
+        style_name = self._style_map.get(content_type, fallback or 'Normal')
+        
+        # Проверяем существование стиля в документе
+        if style_name in self.doc.styles:
+            return style_name
+        
+        # Fallback: стандартные имена Word
+        fallback_map = {
+            'heading_1': 'Heading 1',
+            'heading_2': 'Heading 2',
+            'heading_3': 'Heading 3',
+            'heading_4': 'Heading 4',
+            'paragraph': 'Normal',
+            'caption': 'Normal',
+            'table_name': 'Normal',
+            'table_note': 'Normal',
+            'table_grid': 'Table Grid',
+            'list': 'List Paragraph',
+            'note': 'Normal',
+        }
+        fallback_name = fallback_map.get(content_type, 'Normal')
+        if fallback_name in self.doc.styles:
+            logger.warning(f"Стиль '{style_name}' для '{content_type}' не найден, используем '{fallback_name}'")
+            return fallback_name
+        
+        return 'Normal'
+
     def _load_config(self, config_path):
         """Загрузка конфигурации из YAML файла"""
         try:
@@ -116,7 +191,7 @@ class RI2013Converter:
     def _get_default_config(self):
         """Конфигурация по умолчанию на основе НТД 01-2013"""
         return {
-            'version': '4.2',
+            'version': '4.3',
             'name': 'НТД 01-2013 Редакция 4',
             'styles': {
                 'Normal': {
@@ -252,11 +327,24 @@ class RI2013Converter:
                     'header_repeat_on_pages': True,
                     'column_numbering': True
                 }
+            },
+            'content_type_styles': {
+                'heading_1': 'Heading 1',
+                'heading_2': 'Heading 2',
+                'heading_3': 'Heading 3',
+                'heading_4': 'Heading 4',
+                'paragraph': 'Normal',
+                'caption': 'Caption',
+                'table_name': 'Caption',
+                'table_note': 'Table Note',
+                'table_grid': 'Table Grid',
+                'list': 'List Paragraph',
+                'note': 'Note',
             }
         }
     
     def _setup_document(self):
-        """Настройка документа согласно НТД 01-2013"""
+        """Настройка документа согласно конфигу"""
         self.page_manager = PageManager(self.config)
         self.page_manager.apply_all(self.doc)
 
@@ -270,9 +358,28 @@ class RI2013Converter:
             sm = StyleManager(loader)
             sm.setup_styles(self.doc)
 
+        # Обеспечиваем наличие всех стилей, указанных в content_type_styles
+        self._ensure_all_config_styles()
+
         # Копирование стилей из DOCX-шаблона (если указан)
         if self.template_path and os.path.exists(self.template_path):
             self._copy_styles_from_template()
+
+    def _ensure_all_config_styles(self):
+        """Создаёт в документе все стили, перечисленные в content_type_styles конфига."""
+        content_type_styles = self.config.get('content_type_styles', {})
+        for content_type, style_name in content_type_styles.items():
+            if style_name not in self.doc.styles:
+                # Стиль не существует — создаём с настройками из секции styles конфига
+                style_config = self.config.get('styles', {}).get(style_name)
+                if style_config and style_config.get('enabled', True):
+                    self.style_manager.ensure_style_exists(self.doc, style_name, style_config)
+                else:
+                    # Нет конфига — создаём пустой стиль
+                    try:
+                        self.doc.styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
+                    except Exception:
+                        pass  # Стиль уже существует или не может быть создан
 
     def _copy_styles_from_template(self):
         """Копирует стили из DOCX-шаблона в текущий документ"""
@@ -556,10 +663,10 @@ class RI2013Converter:
             else:
                 # Если предыдущая непустая строка была подписью таблицы — это заголовок таблицы
                 if caption_added and last_caption_text:
-                    # Заголовок таблицы — по центру без отступа
-                    paragraph = self.doc.add_paragraph(style='Normal')
+                    # Заголовок таблицы — стиль определяет выравнивание из конфига
+                    table_name_style = self._resolve_style('table_name')
+                    paragraph = self.doc.add_paragraph(style=table_name_style)
                     self._add_rich_text(paragraph, line)
-                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     paragraph.paragraph_format.first_line_indent = Cm(0)
                     caption_added = False
                     last_caption_text = ''
@@ -569,16 +676,11 @@ class RI2013Converter:
                 continue
     
     def _add_heading(self, text, level=1):
-        """Добавление заголовка (Таблица 2.1) с поддержкой **bold**"""
-        # Используем шаблонный стиль если доступен
-        style_name = self.TEMPLATE_STYLE_MAP.get(level, f'Heading {level}')
+        """Добавление заголовка с поддержкой **bold**"""
+        # Резолвим стиль из конфига по уровню заголовка
+        style_name = self._resolve_style(f'heading_{level}')
 
-        # Проверяем существование стиля
-        if style_name in self.doc.styles:
-            paragraph = self.doc.add_paragraph(style=style_name)
-        else:
-            # Fallback на стандартный стиль
-            paragraph = self.doc.add_paragraph(style=f'Heading {level}')
+        paragraph = self.doc.add_paragraph(style=style_name)
 
         self._add_rich_text(paragraph, text)
 
@@ -598,49 +700,45 @@ class RI2013Converter:
     
     def _add_paragraph(self, text):
         """Добавление абзаца текста (п. 2.7.2) с поддержкой **bold**"""
-        # Используем стиль "Текст доклада" если доступен, иначе Normal
-        if 'Текст доклада' in self.doc.styles:
-            paragraph = self.doc.add_paragraph(style='Текст доклада')
-        else:
-            paragraph = self.doc.add_paragraph(style='Normal')
-            paragraph.paragraph_format.line_spacing = 1.15
-            paragraph.paragraph_format.first_line_indent = Cm(1.25)
+        style_name = self._resolve_style('paragraph')
+        paragraph = self.doc.add_paragraph(style=style_name)
         self._add_rich_text(paragraph, text)
         self._disable_hyphenation(paragraph)
         return paragraph
     
     def _add_rich_text(self, paragraph, text):
         """Добавляет текст с поддержкой **bold** сегментов в параграф."""
+        # Определяем шрифт из конфига текущего стиля
+        style_name = paragraph.style.name
+        style_cfg = self.config.get('styles', {}).get(style_name, {})
+        font_cfg = style_cfg.get('font', {})
+        font_name = font_cfg.get('name', 'Times New Roman')
+        east_asia = font_cfg.get('east_asia', font_name)
+
         parts = re.split(r'(\*\*.*?\*\*)', text)
         for part in parts:
             if part.startswith('**') and part.endswith('**'):
                 inner = self._clean_text(part[2:-2])
                 run = paragraph.add_run(inner)
                 run.bold = True
-                run.font.name = 'Times New Roman'
+                run.font.name = font_name
                 rPr = run._element.get_or_add_rPr()
                 rFonts = rPr.get_or_add_rFonts()
-                rFonts.set(qn('w:eastAsia'), 'Times New Roman')
+                rFonts.set(qn('w:eastAsia'), east_asia)
             else:
                 cleaned = self._clean_text(part)
                 if cleaned:
                     run = paragraph.add_run(cleaned)
-                    run.font.name = 'Times New Roman'
+                    run.font.name = font_name
                     rPr = run._element.get_or_add_rPr()
                     rFonts = rPr.get_or_add_rFonts()
-                    rFonts.set(qn('w:eastAsia'), 'Times New Roman')
+                    rFonts.set(qn('w:eastAsia'), east_asia)
     
     def _add_caption(self, text):
-        """Добавление подписи таблицы/рисунка (п. 2.10.2, 2.11.2)
-        Подпись "Таблица X.Y.Z" выравнивается по правому краю
-        """
+        """Добавление подписи таблицы/рисунка (п. 2.10.2, 2.11.2)"""
         cleaned = self._clean_text(text)
-        paragraph = self.doc.add_paragraph(cleaned, style='Caption')
-        # Подпись "Таблица X.Y.Z" — по правому краю (п. 2.10.1)
-        if re.match(r'^Таблица\s+\d+', cleaned) or re.match(r'^Рисунок\s+\d+', cleaned):
-            paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        else:
-            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        style_name = self._resolve_style('caption')
+        paragraph = self.doc.add_paragraph(cleaned, style=style_name)
         if paragraph.text.endswith('.'):
             paragraph.text = paragraph.text[:-1]
         return paragraph
@@ -659,8 +757,8 @@ class RI2013Converter:
             else:
                 table_title = f"Таблица {section_num}.{table_num}"
             
-            caption_paragraph = self.doc.add_paragraph(table_title, style='Caption')
-            caption_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            caption_style = self._resolve_style('caption')
+            caption_paragraph = self.doc.add_paragraph(table_title, style=caption_style)
             if caption_paragraph.text.endswith('.'):
                 caption_paragraph.text = caption_paragraph.text[:-1]
         
@@ -675,8 +773,9 @@ class RI2013Converter:
         else:
             header_data = [data[0]]
         
+        table_grid_style = self._resolve_style('table_grid')
         header_table = self.doc.add_table(rows=len(header_data), cols=len(header_data[0]))
-        header_table.style = 'Table Grid'
+        header_table.style = table_grid_style
         self._setup_table_header(header_table, header_data[0])
         if numbering_row_idx is not None:
             self._setup_numbering_row(header_table, header_data[1])
@@ -696,18 +795,19 @@ class RI2013Converter:
         # Основная таблица (без spacer — шапка и тело идут подряд)
         body_start = (numbering_row_idx + 1) if numbering_row_idx is not None else 1
         main_table = self.doc.add_table(rows=len(data) - body_start, cols=len(data[0]))
-        main_table.style = 'Table Grid'
+        main_table.style = table_grid_style
         self._setup_main_table(main_table, data[body_start:], header_data[0])
 
         # Установка одинаковых ширин колонок для тела таблицы
         self._sync_column_widths(main_table, data)
 
-        # Интервал после таблицы 6 пт (п. 2.10.13) — через spacing последней строки
+        # Интервал после таблицы из конфига (п. 2.10.13)
+        spacing_after = self.config.get('formatting_rules', {}).get('tables', {}).get('spacing_after_table_pt', 6)
         if main_table.rows:
             last_row = main_table.rows[-1]
             for cell in last_row.cells:
                 for para in cell.paragraphs:
-                    para.paragraph_format.space_after = Pt(6)
+                    para.paragraph_format.space_after = Pt(spacing_after)
     
     def _is_numbering_row(self, row_data):
         """Проверяет, является ли строка строкой нумерации граф (1 | 2 | 3 | ...)"""
@@ -717,36 +817,57 @@ class RI2013Converter:
                 return False
         return True
     
+    def _get_table_cell_format(self):
+        """Получает настройки ячеек таблицы из конфига (шрифт, размер, интервалы)."""
+        table_grid_style = self._resolve_style('table_grid')
+        style_cfg = self.config.get('styles', {}).get(table_grid_style, {})
+        font_cfg = style_cfg.get('font', {})
+        para_cfg = style_cfg.get('paragraph', {})
+        return {
+            'font_name': font_cfg.get('name', 'Times New Roman'),
+            'font_size': font_cfg.get('size', 12),
+            'east_asia': font_cfg.get('east_asia', font_cfg.get('name', 'Times New Roman')),
+            'line_spacing': para_cfg.get('line_spacing', 1.0),
+            'first_line_indent_cm': para_cfg.get('first_line_indent_cm', 0),
+            'space_before_pt': para_cfg.get('space_before_pt', 0),
+            'space_after_pt': para_cfg.get('space_after_pt', 0),
+        }
+
+    def _apply_cell_format(self, paragraph, cell_fmt, bold=False, alignment=None):
+        """Применяет форматирование ячейки таблицы из конфига."""
+        if alignment is not None:
+            paragraph.alignment = alignment
+        paragraph.paragraph_format.line_spacing = cell_fmt['line_spacing']
+        paragraph.paragraph_format.first_line_indent = Cm(cell_fmt['first_line_indent_cm'])
+        paragraph.paragraph_format.space_before = Pt(cell_fmt['space_before_pt'])
+        paragraph.paragraph_format.space_after = Pt(cell_fmt['space_after_pt'])
+        for run in paragraph.runs:
+            run.font.name = cell_fmt['font_name']
+            run.font.size = Pt(cell_fmt['font_size'])
+            if bold:
+                run.bold = True
+            rPr = run._element.get_or_add_rPr()
+            rFonts = rPr.get_or_add_rFonts()
+            rFonts.set(qn('w:eastAsia'), cell_fmt['east_asia'])
+
     def _setup_numbering_row(self, table, row_data):
         """Настройка строки нумерации граф (п. 2.10.3)"""
         row = table.rows[1]
-        table_font_cfg = self.config.get('styles', {}).get('Table Grid', {}).get('font', {})
-        font_name = table_font_cfg.get('name', 'Times New Roman')
-        font_size = table_font_cfg.get('size', 12)
-        
+        cell_fmt = self._get_table_cell_format()
+
         for i, cell_text in enumerate(row_data):
             if i >= len(row.cells):
                 break
             cell = row.cells[i]
             cell.text = cell_text.strip()
             for paragraph in cell.paragraphs:
-                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                paragraph.paragraph_format.line_spacing = 1.0
-                paragraph.paragraph_format.first_line_indent = Cm(0)
-                paragraph.paragraph_format.space_before = Pt(0)
-                paragraph.paragraph_format.space_after = Pt(0)
-                for run in paragraph.runs:
-                    run.font.name = font_name
-                    run.font.size = Pt(font_size)
-                    rPr = run._element.get_or_add_rPr()
-                    rFonts = rPr.get_or_add_rFonts()
-                    rFonts.set(qn('w:eastAsia'), font_name)
+                self._apply_cell_format(paragraph, cell_fmt, alignment=WD_ALIGN_PARAGRAPH.CENTER)
             cell.margin_left = Cm(0)
             cell.margin_right = Cm(0)
             cell.margin_top = Cm(0)
             cell.margin_bottom = Cm(0)
             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
-        
+
         self._set_table_row_height(table, 1, 'minimum')
     
     def _parse_table_data(self, table_lines):
@@ -770,35 +891,21 @@ class RI2013Converter:
     def _setup_table_header(self, table, headers):
         """Настройка шапки таблицы (п. 2.10.3, 2.10.4)"""
         header_row = table.rows[0]
-        table_font_cfg = self.config.get('styles', {}).get('Table Grid', {}).get('font', {})
-        font_name = table_font_cfg.get('name', 'Times New Roman')
-        font_size = 10  # 10pt как в образце
-        
+        cell_fmt = self._get_table_cell_format()
+
         for i, header_text in enumerate(headers):
             header_text = self._clean_text(header_text)
             cell = header_row.cells[i]
             cell.text = header_text
-            
+
             for paragraph in cell.paragraphs:
-                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                paragraph.paragraph_format.line_spacing = 1.0
-                paragraph.paragraph_format.first_line_indent = Cm(0)
-                paragraph.paragraph_format.space_before = Pt(0)
-                paragraph.paragraph_format.space_after = Pt(0)
-                
                 if header_text:
                     paragraph.text = header_text
-                
+
                 if paragraph.text.endswith('.'):
                     paragraph.text = paragraph.text[:-1]
-                
-                for run in paragraph.runs:
-                    run.font.name = font_name
-                    run.font.size = Pt(font_size)
-                    run.bold = True
-                    rPr = run._element.get_or_add_rPr()
-                    rFonts = rPr.get_or_add_rFonts()
-                    rFonts.set(qn('w:eastAsia'), font_name)
+
+                self._apply_cell_format(paragraph, cell_fmt, bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
 
             # Обнуление margin ячеек
             cell.margin_left = Cm(0)
@@ -811,58 +918,46 @@ class RI2013Converter:
 
     def _setup_main_table(self, table, data, headers):
         """Настройка основной таблицы (п. 2.10)"""
-        table_font_cfg = self.config.get('styles', {}).get('Table Grid', {}).get('font', {})
-        font_name = table_font_cfg.get('name', 'Times New Roman')
-        font_size = 10  # 10pt как в образце
-        
+        cell_fmt = self._get_table_cell_format()
+
         for row_idx, row_data in enumerate(data):
             row = table.rows[row_idx]
-            
+
             for col_idx, cell_text in enumerate(row_data):
                 if col_idx < len(row.cells):
                     cell_text = self._clean_text(cell_text)
                     cell = row.cells[col_idx]
                     cell.text = cell_text
-                    
+
                     for paragraph in cell.paragraphs:
-                        paragraph.paragraph_format.line_spacing = 1.0
-                        paragraph.paragraph_format.first_line_indent = Cm(0)
-                        paragraph.paragraph_format.space_before = Pt(0)
-                        paragraph.paragraph_format.space_after = Pt(0)
-                        
                         if col_idx == 0:
-                            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                            alignment = WD_ALIGN_PARAGRAPH.LEFT
                             if cell_text:
                                 paragraph.text = cell_text[0].upper() + cell_text[1:] if cell_text else cell_text
                             if paragraph.text.endswith('.'):
                                 paragraph.text = paragraph.text[:-1]
                         elif self._is_numeric(cell_text):
-                            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            alignment = WD_ALIGN_PARAGRAPH.CENTER
                         else:
-                            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                        
-                        for run in paragraph.runs:
-                            run.font.name = font_name
-                            run.font.size = Pt(font_size)
-                            rPr = run._element.get_or_add_rPr()
-                            rFonts = rPr.get_or_add_rFonts()
-                            rFonts.set(qn('w:eastAsia'), font_name)
-                    
+                            alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+                        self._apply_cell_format(paragraph, cell_fmt, alignment=alignment)
+
                     # Обнуление margin ячеек
                     cell.margin_left = Cm(0)
                     cell.margin_right = Cm(0)
                     cell.margin_top = Cm(0)
                     cell.margin_bottom = Cm(0)
-                    
+
                     # Выравнивание сверху (п. 2.10.7)
                     cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
-            
+
             # Настройка высоты строки (п. 2.10.8)
             self._set_table_row_height(table, row_idx, 'minimum')
-        
+
         # Автоподбор по ширине окна (п. 2.10.9)
         table.autofit = True
-        
+
         # Повтор заголовков на следующих страницах (п. 2.10.5)
         self._repeat_header_on_pages(table)
     
@@ -976,25 +1071,20 @@ class RI2013Converter:
             return False
     
     def _add_table_note(self, text):
-        """Добавление примечания к таблице (п. 2.10.14, 2.12)
-        Размер шрифта 10 пт (п. 2.12.3)
-        """
+        """Добавление примечания к таблице (п. 2.10.14, 2.12)"""
         text = self._clean_text(text)
         # С прописной буквы (п. 2.12.2)
         if text:
             text = text[0].upper() + text[1:]
 
-        paragraph = self.doc.add_paragraph(style='Table Note')
+        style_name = self._resolve_style('table_note')
+        paragraph = self.doc.add_paragraph(style=style_name)
 
-        # Интервал перед примечанием 0 пт (п. 2.10.14, 2.12.4)
-        paragraph.paragraph_format.space_before = Pt(0)
-
-        # Без абзаца (п. 2.12.2)
-        paragraph.paragraph_format.first_line_indent = Cm(0)
-
-        # Добавляем run с нужным размером шрифта
+        # Добавляем run с нужным размером шрифта из конфига
+        font_cfg = self.config.get('styles', {}).get(style_name, {}).get('font', {})
+        font_size = font_cfg.get('size', 10)
         run = paragraph.add_run(text)
-        run.font.size = Pt(10)
+        run.font.size = Pt(font_size)
 
         return paragraph
     
@@ -1002,21 +1092,25 @@ class RI2013Converter:
         """Добавление примечания/комментария (п. 2.12)"""
         clean_text = self._clean_text(text.strip())
         
-        note_config = self.config.get('styles', {}).get('Note', {}).get('paragraph', {})
-        paragraph = self.doc.add_paragraph(clean_text, style='Note')
-        paragraph.paragraph_format.first_line_indent = Cm(note_config.get('first_line_indent_cm', 0))
-        paragraph.paragraph_format.line_spacing = note_config.get('line_spacing', 1.0)
+        style_name = self._resolve_style('note')
+        paragraph = self.doc.add_paragraph(clean_text, style=style_name)
+        
+        # Применяем настройки абзаца из конфига
+        note_config = self.config.get('styles', {}).get(style_name, {}).get('paragraph', {})
+        if note_config:
+            if 'first_line_indent_cm' in note_config:
+                paragraph.paragraph_format.first_line_indent = Cm(note_config['first_line_indent_cm'])
+            if 'line_spacing' in note_config:
+                paragraph.paragraph_format.line_spacing = note_config['line_spacing']
         
         return paragraph
     
     def _add_list_item(self, text):
         """Добавление элемента списка (п. 2.8) с поддержкой **bold** и номеров"""
-        paragraph = self.doc.add_paragraph(style='Normal')
+        style_name = self._resolve_style('list')
+        paragraph = self.doc.add_paragraph(style=style_name)
 
         stripped = text.lstrip()
-        paragraph.paragraph_format.line_spacing = 1.15
-        paragraph.paragraph_format.first_line_indent = Cm(1.25)
-
         self._add_rich_text(paragraph, stripped)
 
         return paragraph

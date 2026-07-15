@@ -29,9 +29,9 @@ HEADING_PATTERNS = [
     (r'^РАЗДЕЛ\s+\d+', 'Heading 1'),
     (r'^ГЛАВА\s+\d+', 'Heading 2'),
     (r'^\d+\.\d+\s+', 'Heading 3'),
-    (r'^Таблица\s+\d+', 'Caption'),
-    (r'^Рисунок\s+\d+', 'Caption'),
-    (r'^Примечание', 'Table Note'),
+    (r'^Таблица\s+\d+', '05_Номер таблицы'),
+    (r'^Рисунок\s+\d+', '05_Номер таблицы'),
+    (r'^Примечание', '055_Примечание после таблицы/рисунка'),
     (r'^\s*[–−-]\s+', 'List Paragraph'),
     (r'^\s*\d+\.[\s)]', 'List Paragraph'),
 ]
@@ -97,30 +97,36 @@ class TemplateExtractor:
     # ------------------------------------------------------------------
 
     def _extract_styles(self):
-        """Извлекает все параграфные стили из документа."""
+        """Извлекает только стили, реально использованные в параграфах документа."""
+        # Собираем множество имён стилей, применённых к параграфам
+        used_style_names: set = set()
+        for para in self.doc.paragraphs:
+            used_style_names.add(para.style.name)
+
+        logger.info(f"Использовано стилей в документе: {len(used_style_names)}")
+
+        # Строим индекс стилей по имени для быстрого доступа
+        styles_by_name = {}
         for style in self.doc.styles:
             if style.type is None:
                 continue
             try:
-                style_type_name = style.type.name
+                if style.type.name != 'PARAGRAPH':
+                    continue
             except AttributeError:
                 continue
+            styles_by_name[style.name] = style
 
-            if style_type_name != 'PARAGRAPH':
+        # Извлекаем настройки только для использованных стилей
+        for style_name in sorted(used_style_names):
+            if style_name in ('Default Paragraph Font',):
                 continue
-
-            if style.name in ('Default Paragraph Font', 'Normal', 'Обычный'):
+            style = styles_by_name.get(style_name)
+            if style is None:
                 continue
-
             style_cfg = self._extract_single_style(style)
             if style_cfg:
                 self.styles_config[style.name] = style_cfg
-
-        if 'Normal' not in self.styles_config and 'Обычный' not in self.styles_config:
-            normal = self.doc.styles['Normal']
-            style_cfg = self._extract_single_style(normal)
-            if style_cfg:
-                self.styles_config['Normal'] = style_cfg
 
     def _extract_single_style(self, style) -> Optional[Dict[str, Any]]:
         """Извлекает настройки одного стиля."""
@@ -260,20 +266,61 @@ class TemplateExtractor:
     # ------------------------------------------------------------------
 
     def _extract_headers_footers(self):
-        """Извлекает настройки колонтитулов из первой секции."""
+        """Извлекает настройки колонтитулов. Учитывает пустую первую страницу (титул)."""
         if not self.doc.sections:
             return
 
-        section = self.doc.sections[0]
+        section0 = self.doc.sections[0]
+        header_cfg = self._extract_header_config(section0)
+        footer_cfg = self._extract_footer_config(section0)
 
-        header_cfg = self._extract_header_config(section)
-        footer_cfg = self._extract_footer_config(section)
+        # Проверяем, пуста ли первая страница, но есть колонтитулы в других секциях
+        first_page_header_empty = self._is_hf_empty(section0, 'header')
+        first_page_footer_empty = self._is_hf_empty(section0, 'footer')
+
+        later_has_header = False
+        later_has_footer = False
+        for s in self.doc.sections[1:]:
+            if not self._is_hf_empty(s, 'header'):
+                later_has_header = True
+            if not self._is_hf_empty(s, 'footer'):
+                later_has_footer = True
+            if later_has_header and later_has_footer:
+                break
 
         self.headers_footers = {}
         if header_cfg:
+            if first_page_header_empty and later_has_header:
+                header_cfg['first_page_empty'] = True
             self.headers_footers['header'] = header_cfg
         if footer_cfg:
+            if first_page_footer_empty and later_has_footer:
+                footer_cfg['first_page_empty'] = True
             self.headers_footers['footer'] = footer_cfg
+
+    def _is_hf_empty(self, section, hf_type: str) -> bool:
+        """Проверяет, пуст ли колонтитул (нет текста, SDT, полей)."""
+        try:
+            hf = section.header if hf_type == 'header' else section.footer
+            if hf is None:
+                return True
+            # Связанные колонтитулы наследуют от предыдущей — считаем что не пустые
+            if hf.is_linked_to_previous:
+                return False
+            for para in hf.paragraphs:
+                if para.text.strip():
+                    return False
+                p_xml = para._element.xml
+                if 'w:sdt' in p_xml or 'fldChar' in p_xml or 'instrText' in p_xml:
+                    return False
+                if 'w:drawing' in p_xml or 'w:pict' in p_xml:
+                    return False
+            # Проверяем SDT на уровне колонтитула
+            if 'w:sdt' in hf._element.xml:
+                return False
+            return True
+        except Exception:
+            return True
 
     def _extract_header_config(self, section) -> Optional[Dict[str, Any]]:
         """Извлекает конфигурацию верхнего колонтитула."""

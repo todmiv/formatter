@@ -10,7 +10,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from src.core.config_loader import ConfigLoader
-from src.core.docx_utils import get_xml_attr_twips, normalize_color
+from src.core.docx_utils import get_xml_attr_twips, normalize_color, has_direct_paragraph_formatting, has_direct_run_formatting
 
 class Severity(Enum):
     INFO = "INFO"
@@ -261,8 +261,8 @@ class AuditEngine:
             return "Normal"
         if "Обычный" in self.config.styles:
             return "Обычный"
-            
-        # Крайний случай: если в конфиге вообще нет Normal (ошибка конфига), 
+
+        # Крайний случай: если в конфиге вообще нет Normal (ошибка конфига),
         # возвращаем текущий стиль, чтобы не ломать выполнение, но это редкость.
         return current_style_name
 
@@ -329,61 +329,61 @@ class AuditEngine:
         runs = [r for r in para.runs if r.text.strip()]
         if not runs:
             return issues
-            
-        rep_run = runs[0] 
-        
-        # Получение имени шрифта (w:rFonts — дочерний элемент w:rPr, не атрибут w:r)
-        actual_font_name = None
-        rPr = rep_run._element.find(qn('w:rPr'))
-        if rPr is not None:
-            rFonts_elem = rPr.find(qn('w:rFonts'))
-            if rFonts_elem is not None:
-                actual_font_name = rFonts_elem.get(qn('w:ascii')) or rFonts_elem.get(qn('w:hAnsi'))
-        
-        if actual_font_name is None and hasattr(para.style.font, 'name'):
-            actual_font_name = para.style.font.name
 
-        if actual_font_name and actual_font_name != expected_font['name']:
-            issues.append(self._create_issue(
-                severity=Severity.CRITICAL,
-                category="FONT",
-                elem_type=style_name,
-                loc={'index': idx, 'page': page},
-                desc=f"Неверный шрифт",
-                current=actual_font_name,
-                expected=expected_font['name'],
-                payload={'style': style_name, 'prop': 'font_name'}
-            ))
+        rep_run = runs[0]
 
-        # Размер шрифта
-        actual_size_twips = None
-        if rep_run.font.size:
-            actual_size_twips = rep_run.font.size.twips
-        elif para.style.font.size:
-            actual_size_twips = para.style.font.size.twips
-            
-        if actual_size_twips is not None:
-            expected_twips = expected_font.get('size_twips', 0)
-            if abs(actual_size_twips - expected_twips) > self.FONT_SIZE_TOLERANCE_TWIPS:
+        # Имя шрифта — пропускаем если задано прямое форматирование
+        if 'name' in expected_font and not has_direct_run_formatting(para, 'font_name'):
+            actual_font_name = None
+            rPr = rep_run._element.find(qn('w:rPr'))
+            if rPr is not None:
+                rFonts_elem = rPr.find(qn('w:rFonts'))
+                if rFonts_elem is not None:
+                    actual_font_name = rFonts_elem.get(qn('w:ascii')) or rFonts_elem.get(qn('w:hAnsi'))
+
+            if actual_font_name is None and hasattr(para.style.font, 'name'):
+                actual_font_name = para.style.font.name
+
+            if actual_font_name and actual_font_name != expected_font['name']:
                 issues.append(self._create_issue(
                     severity=Severity.CRITICAL,
                     category="FONT",
                     elem_type=style_name,
                     loc={'index': idx, 'page': page},
-                    desc=f"Неверный размер шрифта",
-                    current=f"{actual_size_twips/20:.1f} пт",
-                    expected=f"{expected_font['size']} пт",
-                    payload={'style': style_name, 'prop': 'font_size'}
+                    desc=f"Неверный шрифт",
+                    current=actual_font_name,
+                    expected=expected_font['name'],
+                    payload={'style': style_name, 'prop': 'font_name'}
                 ))
 
-        # Цвет шрифта
-        if 'color' in expected_font:
+        # Размер шрифта — пропускаем если задано прямое форматирование
+        if not has_direct_run_formatting(para, 'font_size'):
+            actual_size_twips = None
+            if rep_run.font.size:
+                actual_size_twips = rep_run.font.size.twips
+            elif para.style.font.size:
+                actual_size_twips = para.style.font.size.twips
+
+            if actual_size_twips is not None:
+                expected_twips = expected_font.get('size_twips', 0)
+                if abs(actual_size_twips - expected_twips) > self.FONT_SIZE_TOLERANCE_TWIPS:
+                    issues.append(self._create_issue(
+                        severity=Severity.CRITICAL,
+                        category="FONT",
+                        elem_type=style_name,
+                        loc={'index': idx, 'page': page},
+                        desc=f"Неверный размер шрифта",
+                        current=f"{actual_size_twips/20:.1f} пт",
+                        expected=f"{expected_font['size']} пт",
+                        payload={'style': style_name, 'prop': 'font_size'}
+                    ))
+
+        # Цвет шрифта — пропускаем если задано прямое форматирование
+        if 'color' in expected_font and not has_direct_run_formatting(para, 'color'):
             expected_color_str = expected_font['color']
             expected_color = normalize_color(expected_color_str)
             actual_color = rep_run.font.color.rgb if rep_run.font.color and rep_run.font.color.rgb else None
-            # Если цвет не задан (None) и ожидается не None, это несоответствие
             if actual_color != expected_color:
-                # Преобразуем для читаемого вывода
                 actual_str = str(actual_color) if actual_color else "не задан"
                 expected_str = str(expected_color) if expected_color else "не задан"
                 issues.append(self._create_issue(
@@ -396,7 +396,7 @@ class AuditEngine:
                     expected=expected_str,
                     payload={'style': style_name, 'prop': 'font_color'}
                 ))
-        
+
         return issues
 
     # Метод _get_xml_attr_twips удалён, используем функцию из docx_utils
@@ -404,45 +404,37 @@ class AuditEngine:
     def _check_paragraph_formatting(self, para, expected_para: Dict, style_name: str, idx: int, page: int) -> List[AuditIssue]:
         issues = []
         pPr = para._element.pPr
-        
-        # Если нет настроек абзаца (pPr), значит все наследуется. 
-        # Сравнивать не с чем на уровне явного определения, кроме как с дефолтом стиля.
-        # Но мы проверяем соответствие КОНФИГУ. Если в конфиге требуется отступ, а в pPr его нет — это ошибка (наследуется 0).
-        
-        # --- Отступ первой строки (w:ind w:firstLine) ---
-        expected_first_twips = expected_para.get('first_line_indent_twips', 0)
-        actual_first_twips = 0 # По умолчанию 0, если не указано иное
-        
-        if pPr is not None:
-            indent_elem = pPr.find(qn('w:ind'))
-            if indent_elem is not None:
-                val = get_xml_attr_twips(indent_elem, 'w:firstLine')
-                if val is not None:
-                    actual_first_twips = val
-                # Если есть w:hanging, это другой тип отступа, но для ГОСТ обычно firstLine
-            # Если indent_elem нет, значит отступ явно не задан на уровне параграфа (наследуется от стиля)
-            # Для точности аудита нам нужно знать эффективный отступ. 
-            # Упрощение: считаем, что если в pPr нет явного ind, то берем из стиля.
-        
-        # Если в pPr нет явного отступа, пробуем взять из стиля параграфа
-        if pPr is None or pPr.find(qn('w:ind')) is None:
-            if para.style.paragraph_format.first_line_indent:
-                actual_first_twips = para.style.paragraph_format.first_line_indent.twips
 
-        if abs(actual_first_twips - expected_first_twips) > self.INDENT_TOLERANCE_TWIPS:
-             issues.append(self._create_issue(
-                severity=Severity.CRITICAL,
-                category="PARAGRAPH",
-                elem_type=style_name,
-                loc={'index': idx, 'page': page},
-                desc="Неверный абзацный отступ",
-                current=f"{actual_first_twips/567:.2f} см",
-                expected=f"{expected_para.get('first_line_indent_cm', 0)} см",
-                payload={'style': style_name, 'prop': 'first_line_indent'}
-            ))
-        
-        # --- Выравнивание (w:jc) ---
-        actual_align = 'left' # Default
+        # --- Отступ первой строки — пропускаем если прямое форматирование ---
+        if not has_direct_paragraph_formatting(para, 'first_line'):
+            expected_first_twips = expected_para.get('first_line_indent_twips', 0)
+            actual_first_twips = 0
+
+            if pPr is not None:
+                indent_elem = pPr.find(qn('w:ind'))
+                if indent_elem is not None:
+                    val = get_xml_attr_twips(indent_elem, 'w:firstLine')
+                    if val is not None:
+                        actual_first_twips = val
+
+            if pPr is None or pPr.find(qn('w:ind')) is None:
+                if para.style.paragraph_format.first_line_indent:
+                    actual_first_twips = para.style.paragraph_format.first_line_indent.twips
+
+            if abs(actual_first_twips - expected_first_twips) > self.INDENT_TOLERANCE_TWIPS:
+                 issues.append(self._create_issue(
+                    severity=Severity.CRITICAL,
+                    category="PARAGRAPH",
+                    elem_type=style_name,
+                    loc={'index': idx, 'page': page},
+                    desc="Неверный абзацный отступ",
+                    current=f"{actual_first_twips/567:.2f} см",
+                    expected=f"{expected_para.get('first_line_indent_cm', 0)} см",
+                    payload={'style': style_name, 'prop': 'first_line_indent'}
+                ))
+
+        # --- Выравнивание ---
+        actual_align = 'left'
         if pPr is not None:
             jc_elem = pPr.find(qn('w:jc'))
             if jc_elem is not None:
@@ -450,70 +442,86 @@ class AuditEngine:
                 if val:
                     map_align = {'both': 'justify', 'left': 'left', 'center': 'center', 'right': 'right'}
                     actual_align = map_align.get(val, 'left')
-        
+
+        # Если нет прямого форматирования — наследуем от стиля
+        if not has_direct_paragraph_formatting(para, 'alignment'):
+            try:
+                from docx.enum.text import WD_ALIGN_PARAGRAPH
+                style_align = para.style.paragraph_format.alignment
+                if style_align is not None:
+                    wd_map = {
+                        WD_ALIGN_PARAGRAPH.LEFT: 'left',
+                        WD_ALIGN_PARAGRAPH.CENTER: 'center',
+                        WD_ALIGN_PARAGRAPH.RIGHT: 'right',
+                        WD_ALIGN_PARAGRAPH.JUSTIFY: 'justify',
+                        WD_ALIGN_PARAGRAPH.DISTRIBUTE: 'justify',
+                    }
+                    actual_align = wd_map.get(style_align, 'left')
+            except Exception:
+                pass
+
         expected_align = expected_para.get('alignment', 'left')
         if actual_align != expected_align:
-            issues.append(self._create_issue(
-                severity=Severity.WARNING,
-                category="PARAGRAPH",
-                elem_type=style_name,
-                loc={'index': idx, 'page': page},
-                desc="Неверное выравнивание",
-                current=actual_align,
-                expected=expected_align,
-                payload={'style': style_name, 'prop': 'alignment'}
-            ))
-
-        # --- Интервалы (w:spacing) ---
-        spacing_elem = None
-        if pPr is not None:
-            spacing_elem = pPr.find(qn('w:spacing'))
-        
-        # Перед абзацем (w:before)
-        if 'space_before_twips' in expected_para:
-            exp_before = expected_para['space_before_twips']
-            act_before = 0
-            if spacing_elem is not None:
-                val = get_xml_attr_twips(spacing_elem, 'w:before')
-                if val is not None:
-                    act_before = val
-            elif para.style.paragraph_format.space_before:
-                act_before = para.style.paragraph_format.space_before.twips
-                
-            if abs(act_before - exp_before) > self.SPACING_TOLERANCE_TWIPS:
                 issues.append(self._create_issue(
                     severity=Severity.WARNING,
                     category="PARAGRAPH",
                     elem_type=style_name,
                     loc={'index': idx, 'page': page},
-                    desc="Неверный интервал перед абзацем",
-                    current=f"{act_before/20:.0f} пт",
-                    expected=f"{expected_para.get('space_before_pt', 0)} пт",
-                    payload={'style': style_name, 'prop': 'space_before'}
+                    desc="Неверное выравнивание",
+                    current=actual_align,
+                    expected=expected_align,
+                    payload={'style': style_name, 'prop': 'alignment'}
                 ))
 
-        # После абзаца (w:after)
-        if 'space_after_twips' in expected_para:
-            exp_after = expected_para['space_after_twips']
-            act_after = 0
-            if spacing_elem is not None:
-                val = get_xml_attr_twips(spacing_elem, 'w:after')
-                if val is not None:
-                    act_after = val
-            elif para.style.paragraph_format.space_after:
-                act_after = para.style.paragraph_format.space_after.twips
+        # --- Интервалы — пропускаем если прямое форматирование ---
+        if not has_direct_paragraph_formatting(para, 'spacing'):
+            spacing_elem = None
+            if pPr is not None:
+                spacing_elem = pPr.find(qn('w:spacing'))
 
-            if abs(act_after - exp_after) > self.SPACING_TOLERANCE_TWIPS:
-                issues.append(self._create_issue(
-                    severity=Severity.WARNING,
-                    category="PARAGRAPH",
-                    elem_type=style_name,
-                    loc={'index': idx, 'page': page},
-                    desc="Неверный интервал после абзаца",
-                    current=f"{act_after/20:.0f} пт",
-                    expected=f"{expected_para.get('space_after_pt', 0)} пт",
-                    payload={'style': style_name, 'prop': 'space_after'}
-                ))
+            if 'space_before_twips' in expected_para:
+                exp_before = expected_para['space_before_twips']
+                act_before = 0
+                if spacing_elem is not None:
+                    val = get_xml_attr_twips(spacing_elem, 'w:before')
+                    if val is not None:
+                        act_before = val
+                elif para.style.paragraph_format.space_before:
+                    act_before = para.style.paragraph_format.space_before.twips
+
+                if abs(act_before - exp_before) > self.SPACING_TOLERANCE_TWIPS:
+                    issues.append(self._create_issue(
+                        severity=Severity.WARNING,
+                        category="PARAGRAPH",
+                        elem_type=style_name,
+                        loc={'index': idx, 'page': page},
+                        desc="Неверный интервал перед абзацем",
+                        current=f"{act_before/20:.0f} пт",
+                        expected=f"{expected_para.get('space_before_pt', 0)} пт",
+                        payload={'style': style_name, 'prop': 'space_before'}
+                    ))
+
+            if 'space_after_twips' in expected_para:
+                exp_after = expected_para['space_after_twips']
+                act_after = 0
+                if spacing_elem is not None:
+                    val = get_xml_attr_twips(spacing_elem, 'w:after')
+                    if val is not None:
+                        act_after = val
+                elif para.style.paragraph_format.space_after:
+                    act_after = para.style.paragraph_format.space_after.twips
+
+                if abs(act_after - exp_after) > self.SPACING_TOLERANCE_TWIPS:
+                    issues.append(self._create_issue(
+                        severity=Severity.WARNING,
+                        category="PARAGRAPH",
+                        elem_type=style_name,
+                        loc={'index': idx, 'page': page},
+                        desc="Неверный интервал после абзаца",
+                        current=f"{act_after/20:.0f} пт",
+                        expected=f"{expected_para.get('space_after_pt', 0)} пт",
+                        payload={'style': style_name, 'prop': 'space_after'}
+                    ))
                         
         return issues
 
@@ -541,6 +549,35 @@ class AuditEngine:
                 ))
             # Дополнительные проверки можно добавить здесь
 
+    def _hf_has_content(self, hf) -> bool:
+        """Проверяет, есть ли содержимое в колонтителе (текст, SDT, поля, рисунки)."""
+        if hf is None:
+            return False
+        # Проверяем XML на уровне колонтитула (SDT могут быть родителями параграфов)
+        hf_xml = hf._element.xml
+        has_sdt_at_root = 'w:sdt' in hf_xml
+        for para in hf.paragraphs:
+            # Текст
+            if para.text.strip():
+                return True
+            # SDT (Structured Document Tags — нумерация страниц, Автотекст)
+            # Проверяем и параграф, и его родителя (SDT может оборачивать параграф)
+            p_xml = para._element.xml
+            parent = para._element.getparent()
+            parent_xml = parent.xml if parent is not None else ''
+            if 'w:sdt' in p_xml or 'w:sdt' in parent_xml:
+                return True
+            # Поля (PAGE, NUMPAGES и т.д.)
+            if 'fldChar' in p_xml or 'instrText' in p_xml or 'fldSimple' in p_xml:
+                return True
+            # Рисунки / фигуры
+            if 'w:drawing' in p_xml or 'w:pict' in p_xml:
+                return True
+        # Если SDT на уровне колонтитула, но параграфов нет — считаем что содержимое есть
+        if has_sdt_at_root:
+            return True
+        return False
+
     def _audit_headers_footers(self, doc):
         """Аудит колонтитулов документа."""
         config = self.config.get_headers_footers_config()
@@ -555,7 +592,13 @@ class AuditEngine:
             # Аудит верхнего колонтитула
             if header_enabled:
                 header = section.header
-                if header is None or not header.paragraphs:
+                # Пропускаем секции с связанными колонтитулами — они наследуют от предыдущей секции
+                if header is not None and header.is_linked_to_previous:
+                    continue
+                # Пропускаем первую секцию если конфиг помечен как first_page_empty
+                if sect_idx == 0 and config.get('header', {}).get('first_page_empty', False):
+                    continue
+                if not self._hf_has_content(header):
                     self.issues.append(self._create_issue(
                         severity=Severity.WARNING,
                         category="HEADER_FOOTER",
@@ -573,7 +616,13 @@ class AuditEngine:
             # Аудит нижнего колонтитула
             if footer_enabled:
                 footer = section.footer
-                if footer is None or not footer.paragraphs:
+                # Пропускаем секции с связанными колонтитулами — они наследуют от предыдущей секции
+                if footer is not None and footer.is_linked_to_previous:
+                    continue
+                # Пропускаем первую секцию если конфиг помечен как first_page_empty
+                if sect_idx == 0 and config.get('footer', {}).get('first_page_empty', False):
+                    continue
+                if not self._hf_has_content(footer):
                     self.issues.append(self._create_issue(
                         severity=Severity.WARNING,
                         category="HEADER_FOOTER",
@@ -642,10 +691,14 @@ class AuditEngine:
             logger.debug("Конфигурация рисунков отсутствует, пропускаем аудит.")
             return
 
-        # Получаем стиль Caption
-        caption_style_config = self.config.get_style_config('Caption')
+        # Получаем стиль для подписей (05_Номер таблицы или Caption)
+        caption_style_name = '05_Номер таблицы'
+        caption_style_config = self.config.get_style_config(caption_style_name)
         if not caption_style_config or not caption_style_config.get('enabled', True):
-            logger.debug("Стиль Caption не настроен, пропускаем проверку подписей.")
+            caption_style_name = 'Caption'
+            caption_style_config = self.config.get_style_config(caption_style_name)
+        if not caption_style_config or not caption_style_config.get('enabled', True):
+            logger.debug("Стиль подписей не настроен, пропускаем проверку подписей.")
             # Но всё равно проверим наличие подписей
 
         inline_shapes = doc.inline_shapes
@@ -660,30 +713,30 @@ class AuditEngine:
             if re.search(r'^Рисунок\s+\d+', text) or re.search(r'^Рис\.\s*\d+', text, re.IGNORECASE):
                 caption_paragraphs.append((idx, para))
 
-        # Проверка подписей на соответствие стилю Caption
+        # Проверка подписей на соответствие стилю
         for idx, para in caption_paragraphs:
             # Проверка стиля
             actual_style_name = para.style.name
-            if actual_style_name != 'Caption':
+            if actual_style_name != caption_style_name:
                 self.issues.append(self._create_issue(
                     severity=Severity.CRITICAL,
                     category="FIGURE",
-                    elem_type="Caption",
+                    elem_type=caption_style_name,
                     loc={'paragraph_index': idx, 'page': 0},
                     desc="Подпись рисунка имеет неверный стиль",
                     current=actual_style_name,
-                    expected="Caption",
-                    payload={'style': 'Caption', 'prop': 'style_name'}
+                    expected=caption_style_name,
+                    payload={'style': caption_style_name, 'prop': 'style_name'}
                 ))
             # Проверка шрифта и абзаца, если есть конфигурация
             if caption_style_config:
                 if 'font' in caption_style_config:
-                    issues = self._check_font(para, caption_style_config['font'], 'Caption', idx, 0)
+                    issues = self._check_font(para, caption_style_config['font'], caption_style_name, idx, 0)
                     for issue in issues:
                         issue.location = {'paragraph_index': idx, 'page': 0}
                         self.issues.append(issue)
                 if 'paragraph' in caption_style_config:
-                    issues = self._check_paragraph_formatting(para, caption_style_config['paragraph'], 'Caption', idx, 0)
+                    issues = self._check_paragraph_formatting(para, caption_style_config['paragraph'], caption_style_name, idx, 0)
                     for issue in issues:
                         issue.location = {'paragraph_index': idx, 'page': 0}
                         self.issues.append(issue)
@@ -807,8 +860,8 @@ class AuditEngine:
                 desc="Неверное левое поле",
                 current=f"{actual_left_twips/cm_to_twips:.2f} см",
                 expected=f"{expected_left_cm} см",
-                payload={},
-                auto_fixable=False
+                payload={'prop': 'left_margin'},
+                auto_fixable=True
             ))
 
         # Проверка правого поля
@@ -821,8 +874,8 @@ class AuditEngine:
                 desc="Неверное правое поле",
                 current=f"{actual_right_twips/cm_to_twips:.2f} см",
                 expected=f"{expected_right_cm} см",
-                payload={},
-                auto_fixable=False
+                payload={'prop': 'right_margin'},
+                auto_fixable=True
             ))
 
         # Проверка верхнего поля
@@ -835,8 +888,8 @@ class AuditEngine:
                 desc="Неверное верхнее поле",
                 current=f"{actual_top_twips/cm_to_twips:.2f} см",
                 expected=f"{expected_top_cm} см",
-                payload={},
-                auto_fixable=False
+                payload={'prop': 'top_margin'},
+                auto_fixable=True
             ))
 
         # Проверка нижнего поля
@@ -849,8 +902,8 @@ class AuditEngine:
                 desc="Неверное нижнее поле",
                 current=f"{actual_bottom_twips/cm_to_twips:.2f} см",
                 expected=f"{expected_bottom_cm} см",
-                payload={},
-                auto_fixable=False
+                payload={'prop': 'bottom_margin'},
+                auto_fixable=True
             ))
 
         # Проверка размера бумаги (опционально)
