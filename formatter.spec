@@ -13,8 +13,6 @@ a = Analysis(
     binaries=[],
     datas=[
         (os_mod.path.join('configs', 'active', 'config.yaml'), 'configs/active'),
-        (os_mod.path.join('configs', 'active', 'config.json'), 'configs/active'),
-        (os_mod.path.join('configs', 'active', 'config_v3.2.yaml'), 'configs/active'),
         (os_mod.path.join('configs', 'active', 'config_v4.2.yaml'), 'configs/active'),
         (os_mod.path.join('configs', 'includes', 'base_styles.yaml'), 'configs/includes'),
         (os_mod.path.join('configs', 'includes', 'page_setup_gost.yaml'), 'configs/includes'),
@@ -41,6 +39,7 @@ a = Analysis(
         'md_to_docx',
         'yaml', 'docx', 'docx.shared', 'docx.enum.text', 'docx.enum.style', 'docx.enum.table',
         'docx.enum.section', 'docx.oxml', 'docx.oxml.ns', 'docx.oxml.table', 'docx.opc.constants',
+        'docx.opc.part', 'docx.opc.packuri',
         'lxml', 'lxml.etree', 'lxml.objectify',
         'ttkthemes', 'ttkthemes.themed_tk',
         'networkx', 'networkx.algorithms', 'networkx.algorithms.dag',

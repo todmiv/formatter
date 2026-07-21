@@ -476,7 +476,10 @@ class RI2013Converter:
         t_process = time.perf_counter() - t0
         perf_logger.info(f"[PERF] _process_content (парсинг Markdown): {t_process:.4f} сек")
         
-        # Этап 3: Сохранение DOCX
+        # Этап 3: Постобработка колонтитулов (fix #7)
+        self._cleanup_headers_footers()
+
+        # Этап 4: Сохранение DOCX
         t0 = time.perf_counter()
         print(f"💾 Сохранение файла: {docx_path}")
         if progress_callback:
@@ -509,6 +512,7 @@ class RI2013Converter:
         table_counter = {'current': 0}
         caption_added = False
         last_caption_text = ''
+        pending_table_name = ''  # Имя таблицы между подписью и самой таблицей (fix #2)
         last_logged_percent = 0
         
         while i < total_lines:
@@ -529,7 +533,7 @@ class RI2013Converter:
             # Список (п. 2.8) — маркированные и индентированные списки
             if re.match(r'^[\s]*[-•*]\s+', line):
                 caption_added = False
-                self._add_list_item(line)
+                self._add_list_item(line, list_type='bullet')
                 i += 1
                 continue
 
@@ -574,6 +578,7 @@ class RI2013Converter:
                 self._add_caption(line)
                 caption_added = True
                 last_caption_text = line.strip()
+                pending_table_name = ''  # Сброс имени таблицы
                 i += 1
                 continue
             
@@ -608,30 +613,53 @@ class RI2013Converter:
             # Нумерованный список: "1. **текст**" или "1. текст"
             if re.match(r'^\d+\.\s+', line):
                 caption_added = False
-                self._add_list_item(line)
+                self._add_list_item(line, list_type='numbered')
                 i += 1
                 continue
             
             # Таблица (п. 2.10)
             elif line.startswith('|') and '|' in line:
+                # Если перед таблицей была подпись, но не было имени таблицы — рендерим (fix #2)
+                if caption_added and not pending_table_name:
+                    # Подпись была, но имя таблицы не было — таблица идёт сразу после подписи
+                    caption_added = False
+                    last_caption_text = ''
+
                 table_lines = []
                 start_i = i
-                while i < len(lines) and lines[i].strip().startswith('|'):
-                    table_lines.append(lines[i].strip())
-                    i += 1
+                while i < len(lines):
+                    stripped = lines[i].strip()
+                    if stripped.startswith('|'):
+                        table_lines.append(stripped)
+                        i += 1
+                    elif stripped == '':
+                        # Пустая строка внутри таблицы — проверяем, продолжается ли таблица
+                        j = i + 1
+                        while j < len(lines) and lines[j].strip() == '':
+                            j += 1
+                        if j < len(lines) and lines[j].strip().startswith('|'):
+                            # Таблица продолжается после пустых строк — пропускаем их
+                            i = j
+                            continue
+                        else:
+                            break
+                    else:
+                        break
 
                 # Проверка на разделительную строку таблицы
                 if len(table_lines) > 1 and re.match(r'^\|[\s\-:|]+\|$', table_lines[1]):
-                    table_counter['current'] += 1
                     # Проверяем, была ли подписана таблица (ищем "Таблица X.Y.Z" перед таблицей)
                     has_caption = False
                     for j in range(max(0, start_i - 5), start_i):
                         if re.match(r'^(\*\*)?Таблица\s+\d+', lines[j].strip()):
                             has_caption = True
                             break
+                    if not has_caption:
+                        table_counter['current'] += 1
                     self._add_table(table_lines, table_counter, self._current_section, self._current_chapter, skip_caption=has_caption)
                     caption_added = False
                     last_caption_text = ''
+                    pending_table_name = ''
                 else:
                     # Это не таблица, а текст с вертикальными чертами
                     # Возвращаем i на начало и обрабатываем каждую строку как обычный текст
@@ -661,19 +689,44 @@ class RI2013Converter:
             
             # Обычный текст (п. 2.7.2)
             else:
-                # Если предыдущая непустая строка была подписью таблицы — это заголовок таблицы
-                if caption_added and last_caption_text:
+                # Если после подписи таблицы идёт текст — это имя таблицы (fix #2)
+                if caption_added:
                     # Заголовок таблицы — стиль определяет выравнивание из конфига
                     table_name_style = self._resolve_style('table_name')
                     paragraph = self.doc.add_paragraph(style=table_name_style)
                     self._add_rich_text(paragraph, line)
                     paragraph.paragraph_format.first_line_indent = Cm(0)
+                    pending_table_name = line
                     caption_added = False
                     last_caption_text = ''
+                    i += 1
+                    continue
                 else:
-                    self._add_paragraph(line)
-                i += 1
-                continue
+                    # Объединение непрерывных строк в один абзац (fix #5)
+                    paragraph_text = line
+                    j = i + 1
+                    while j < total_lines:
+                        next_line = lines[j].strip()
+                        if not next_line:
+                            break
+                        # Проверяем, является ли следующая строка продолжением абзаца
+                        if (next_line.startswith('#') or
+                            next_line.startswith('|') or
+                            next_line.startswith('- ') or next_line.startswith('• ') or next_line.startswith('* ') or
+                            re.match(r'^\d+\.\s+', next_line) or
+                            re.match(r'^(\*\*)?Таблица\s+\d+', next_line) or
+                            re.match(r'^РАЗДЕЛ\s+', next_line) or
+                            re.match(r'^ГЛАВА\s+', next_line) or
+                            re.match(r'^\d+\.\d+\s+[А-Я]', next_line) or
+                            next_line.startswith('⚠️') or next_line.startswith('📊') or
+                            next_line.startswith('✅') or next_line.startswith('🔍') or
+                            next_line.startswith('🎯') or next_line.startswith('Примечание')):
+                            break
+                        paragraph_text += ' ' + next_line
+                        j += 1
+                    self._add_paragraph(paragraph_text)
+                    i = j
+                    continue
     
     def _add_heading(self, text, level=1):
         """Добавление заголовка с поддержкой **bold**"""
@@ -798,6 +851,9 @@ class RI2013Converter:
         main_table.style = table_grid_style
         self._setup_main_table(main_table, data[body_start:], header_data[0])
 
+        # Вертикальное объединение ячеек в первом столбце (fix #1)
+        self._apply_vmerge(main_table, data[body_start:])
+
         # Установка одинаковых ширин колонок для тела таблицы
         self._sync_column_widths(main_table, data)
 
@@ -879,12 +935,23 @@ class RI2013Converter:
             if re.match(r'^\|[\s\-:|]+\|$', line):
                 continue
             
-            # Извлечение ячеек
+            # Извлечение ячеек (сохраняем пустые ячейки внутри строки)
             cells = [cell.strip() for cell in line.split('|')]
-            cells = [cell for cell in cells if cell]  # Удаление пустых
-            
+            # Удаляем только ведущую и замыкающую пустые (от | на краях строки)
+            if cells and cells[0] == '':
+                cells = cells[1:]
+            if cells and cells[-1] == '':
+                cells = cells[:-1]
+
             if cells:
                 data.append(cells)
+
+        # Нормализация длин строк: дополнение коротких строк пустыми ячейками
+        if data:
+            max_cols = max(len(row) for row in data)
+            for row in data:
+                while len(row) < max_cols:
+                    row.append('')
         
         return data
     
@@ -1057,6 +1124,71 @@ class RI2013Converter:
         tblPr = tbl.tblPr
         tblHeader = OxmlElement('w:tblHeader')
         tblPr.append(tblHeader)
+
+    def _apply_vmerge(self, table, data):
+        """Вертикальное объединение ячеек в первом столбце (fix #1).
+        
+        Алгоритм:
+        1. Группирует строки по одинаковым значениям в первом столбце
+        2. Группа из 2+ строк: первая получает vMerge (restart), остальные — continue
+        3. Группа из 1 строки: без изменений
+        """
+        if not data or len(data) < 2:
+            return
+
+        # Проверяем, включена ли опция в конфиге
+        vm_config = self.config.get('formatting_rules', {}).get('tables', {})
+        if not vm_config.get('vertical_merge_first_column', True):
+            return
+
+        # Группируем строки по значению первого столбца
+        groups = []  # [(start_row_idx, end_row_idx, value), ...]
+        current_group_start = 0
+        current_value = self._clean_text(data[0][0]).strip() if data[0] else ''
+
+        for row_idx in range(1, len(data)):
+            val = self._clean_text(data[row_idx][0]).strip() if data[row_idx] else ''
+            if val == current_value and val:
+                continue  # Продолжаем группу
+            else:
+                # Завершаем предыдущую группу
+                if row_idx - 1 > current_group_start:
+                    groups.append((current_group_start, row_idx - 1, current_value))
+                current_group_start = row_idx
+                current_value = val
+
+        # Последняя группа
+        if len(data) - 1 > current_group_start:
+            groups.append((current_group_start, len(data) - 1, current_value))
+
+        # Применяем vMerge к группам из 2+ строк
+        for start, end, value in groups:
+            if end - start < 1:
+                continue
+            if not value:
+                continue
+
+            # Первая ячейка группы — restart (без атрибута val)
+            first_cell = table.rows[start].cells[0]
+            first_tc = first_cell._tc
+            first_tcPr = first_tc.get_or_add_tcPr()
+            for existing in first_tcPr.findall(qn('w:vMerge')):
+                first_tcPr.remove(existing)
+            vMerge_restart = OxmlElement('w:vMerge')
+            first_tcPr.append(vMerge_restart)
+
+            # Остальные ячейки группы — continue
+            for row_idx in range(start + 1, end + 1):
+                if row_idx >= len(table.rows):
+                    break
+                cell = table.rows[row_idx].cells[0]
+                tc = cell._tc
+                tcPr = tc.get_or_add_tcPr()
+                for existing in tcPr.findall(qn('w:vMerge')):
+                    tcPr.remove(existing)
+                vMerge = OxmlElement('w:vMerge')
+                vMerge.set(qn('w:val'), 'continue')
+                tcPr.append(vMerge)
     
     def _is_numeric(self, text):
         """Проверка является ли текст числовым значением"""
@@ -1105,14 +1237,43 @@ class RI2013Converter:
         
         return paragraph
     
-    def _add_list_item(self, text):
-        """Добавление элемента списка (п. 2.8) с поддержкой **bold** и номеров"""
+    def _add_list_item(self, text, list_type='bullet'):
+        """Добавление элемента списка (п. 2.8) с поддержкой **bold** и numPr XML (fix #3).
+        
+        Args:
+            text: текст строки (с маркером или номером)
+            list_type: 'bullet' для маркированных, 'numbered' для нумерованных
+        """
+        # Убедимся, что numbering part существует
+        self._ensure_numbering_part()
+
         style_name = self._resolve_style('list')
         paragraph = self.doc.add_paragraph(style=style_name)
 
-        stripped = text.lstrip()
-        self._add_rich_text(paragraph, stripped)
+        # Определяем numId: 100 = bullet, 101 = decimal
+        num_id = 100 if list_type == 'bullet' else 101
 
+        # Инжектим <w:numPr> в <w:pPr>
+        pPr = paragraph._element.get_or_add_pPr()
+        numPr = OxmlElement('w:numPr')
+        ilvl = OxmlElement('w:ilvl')
+        ilvl.set(qn('w:val'), '0')
+        numId_el = OxmlElement('w:numId')
+        numId_el.set(qn('w:val'), str(num_id))
+        numPr.append(ilvl)
+        numPr.append(numId_el)
+        pPr.insert(0, numPr)  # numPr должен быть первым в pPr
+
+        # Убираем маркер/номер из текста перед rich text обработкой
+        stripped = text.lstrip()
+        if list_type == 'bullet':
+            # Убираем маркеры: -, •, *
+            stripped = re.sub(r'^[-•*]\s+', '', stripped)
+        else:
+            # Убираем номер: 1., 2., 10. и т.д.
+            stripped = re.sub(r'^\d+\.\s+', '', stripped)
+
+        self._add_rich_text(paragraph, stripped)
         return paragraph
     
     def _get_list_indent_level(self, text):
@@ -1130,6 +1291,142 @@ class RI2013Converter:
         hyphen.set(qn('w:val'), '0')
         pPr.append(hyphen)
 
+    def _ensure_numbering_part(self):
+        """Модифицирует numbering.xml: добавляет bullet (numId=100) и decimal (numId=101) определения.
+        
+        Не удаляет существующие определения, а добавляет новые с высокими numId,
+        чтобы не конфликтовать с дефолтными определениями Document().
+        """
+        from lxml import etree
+
+        NS_W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+        NUM_RELTYPE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering'
+
+        # Находим существующий numbering part
+        numbering_part = None
+        for rel in self.doc.part.rels.values():
+            if rel.reltype == NUM_RELTYPE:
+                numbering_part = rel.target_part
+                break
+
+        if numbering_part is None:
+            return
+
+        # Парсим существующий XML
+        root = etree.fromstring(numbering_part.blob)
+
+        # Проверяем, есть ли уже наши определения (numId=100, 101)
+        existing_num_ids = set()
+        for num_el in root.findall(qn('w:num')):
+            nid = num_el.get(qn('w:numId'))
+            if nid:
+                existing_num_ids.add(nid)
+
+        if '100' in existing_num_ids and '101' in existing_num_ids:
+            return  # Уже добавлены
+
+        # Определяем максимальный abstractNumId
+        max_abstract = 0
+        for abs_el in root.findall(qn('w:abstractNum')):
+            aid = abs_el.get(qn('w:abstractNumId'))
+            if aid:
+                max_abstract = max(max_abstract, int(aid))
+
+        bullet_abstract_id = max_abstract + 1
+        decimal_abstract_id = max_abstract + 2
+
+        # Добавляем abstractNum для bullet
+        bullet_abstract = etree.SubElement(root, qn('w:abstractNum'))
+        bullet_abstract.set(qn('w:abstractNumId'), str(bullet_abstract_id))
+        mlt = etree.SubElement(bullet_abstract, qn('w:multiLevelType'))
+        mlt.set(qn('w:val'), 'hybridMultilevel')
+        lvl = etree.SubElement(bullet_abstract, qn('w:lvl'))
+        lvl.set(qn('w:ilvl'), '0')
+        start = etree.SubElement(lvl, qn('w:start'))
+        start.set(qn('w:val'), '1')
+        fmt = etree.SubElement(lvl, qn('w:numFmt'))
+        fmt.set(qn('w:val'), 'bullet')
+        lvl_text = etree.SubElement(lvl, qn('w:lvlText'))
+        lvl_text.set(qn('w:val'), '\u2022')
+        jc = etree.SubElement(lvl, qn('w:lvlJc'))
+        jc.set(qn('w:val'), 'left')
+        pPr = etree.SubElement(lvl, qn('w:pPr'))
+        ind = etree.SubElement(pPr, qn('w:ind'))
+        ind.set(qn('w:left'), '720')
+        ind.set(qn('w:hanging'), '360')
+        rPr = etree.SubElement(lvl, qn('w:rPr'))
+        rFonts = etree.SubElement(rPr, qn('w:rFonts'))
+        rFonts.set(qn('w:ascii'), 'Symbol')
+        rFonts.set(qn('w:hAnsi'), 'Symbol')
+        rFonts.set(qn('w:hint'), 'default')
+
+        # Добавляем abstractNum для decimal
+        decimal_abstract = etree.SubElement(root, qn('w:abstractNum'))
+        decimal_abstract.set(qn('w:abstractNumId'), str(decimal_abstract_id))
+        mlt2 = etree.SubElement(decimal_abstract, qn('w:multiLevelType'))
+        mlt2.set(qn('w:val'), 'hybridMultilevel')
+        lvl2 = etree.SubElement(decimal_abstract, qn('w:lvl'))
+        lvl2.set(qn('w:ilvl'), '0')
+        start2 = etree.SubElement(lvl2, qn('w:start'))
+        start2.set(qn('w:val'), '1')
+        fmt2 = etree.SubElement(lvl2, qn('w:numFmt'))
+        fmt2.set(qn('w:val'), 'decimal')
+        lvl_text2 = etree.SubElement(lvl2, qn('w:lvlText'))
+        lvl_text2.set(qn('w:val'), '%1.')
+        jc2 = etree.SubElement(lvl2, qn('w:lvlJc'))
+        jc2.set(qn('w:val'), 'left')
+        pPr2 = etree.SubElement(lvl2, qn('w:pPr'))
+        ind2 = etree.SubElement(pPr2, qn('w:ind'))
+        ind2.set(qn('w:left'), '720')
+        ind2.set(qn('w:hanging'), '360')
+
+        # Добавляем num элементы (numId=100 для bullet, numId=101 для decimal)
+        num_bullet = etree.SubElement(root, qn('w:num'))
+        num_bullet.set(qn('w:numId'), '100')
+        abs_ref_b = etree.SubElement(num_bullet, qn('w:abstractNumId'))
+        abs_ref_b.set(qn('w:val'), str(bullet_abstract_id))
+
+        num_decimal = etree.SubElement(root, qn('w:num'))
+        num_decimal.set(qn('w:numId'), '101')
+        abs_ref_d = etree.SubElement(num_decimal, qn('w:abstractNumId'))
+        abs_ref_d.set(qn('w:val'), str(decimal_abstract_id))
+
+        # Сохраняем обратно
+        numbering_part._blob = etree.tostring(root, xml_declaration=True, encoding='UTF-8', standalone=True)
+
+        logger.debug(f"Добавлены в numbering.xml: bullet (numId=100, abstractNumId={bullet_abstract_id}) + decimal (numId=101, abstractNumId={decimal_abstract_id})")
+
+    def _cleanup_headers_footers(self):
+        """Удаление лишних пустых абзацев из колонтитулов (fix #7)"""
+        for section in self.doc.sections:
+            for header in [section.header, section.first_page_header, section.even_page_header]:
+                if header and not header.is_linked_to_previous:
+                    self._remove_empty_hf_paragraphs(header)
+            for footer in [section.footer, section.first_page_footer, section.even_page_footer]:
+                if footer and not footer.is_linked_to_previous:
+                    self._remove_empty_hf_paragraphs(footer)
+
+    def _remove_empty_hf_paragraphs(self, hf):
+        """Удаляет пустые абзацы из колонтитула, оставляя хотя бы один."""
+        from docx.oxml.ns import qn as _qn
+        paragraphs = hf.paragraphs
+        if len(paragraphs) <= 1:
+            return
+        for para in reversed(paragraphs):
+            if len(paragraphs) <= 1:
+                break
+            # Проверяем, есть ли в параграфе содержимое (текст, поля, рисунки)
+            p_xml = para._element
+            has_text = bool(p_xml.text and p_xml.text.strip())
+            has_runs = len(p_xml.findall(_qn('w:r'))) > 0
+            has_fields = (len(p_xml.findall('.//' + _qn('w:fldChar'))) > 0 or
+                          len(p_xml.findall('.//' + _qn('w:instrText'))) > 0)
+            has_drawings = len(p_xml.findall('.//' + _qn('w:drawing'))) > 0
+            has_sdt = len(p_xml.findall('.//' + _qn('w:sdt'))) > 0
+            if not (has_text or has_runs or has_fields or has_drawings or has_sdt):
+                p_xml.getparent().remove(p_xml)
+                paragraphs = hf.paragraphs
+
     def _clean_text(self, text):
         """Удаление markdown-артефактов: двойных звёздочек ** и эмодзи"""
         if not isinstance(text, str):
@@ -1138,6 +1435,9 @@ class RI2013Converter:
         cleaned = re.sub(r'\*\*', '', text)
         # Удаляем эмодзи
         cleaned = self._emoji_pattern.sub('', cleaned)
+        # Удаляем переводы строк и нормализуем пробелы (fix #5)
+        cleaned = cleaned.replace('\n', ' ')
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
         return cleaned
 
 
