@@ -82,6 +82,7 @@ class StyleManager:
                 style.font.size = Pt(font_cfg['size'])
             style.font.bold = font_cfg.get('bold', False)
             style.font.italic = font_cfg.get('italic', False)
+            style.font.all_caps = font_cfg.get('all_caps', False)
             color_val = font_cfg.get('color', 'black')
             color = normalize_color(color_val)
             if color is not None:

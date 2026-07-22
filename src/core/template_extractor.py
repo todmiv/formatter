@@ -163,6 +163,9 @@ class TemplateExtractor:
         if font.italic is not None:
             cfg['italic'] = bool(font.italic)
 
+        if font.all_caps is not None:
+            cfg['all_caps'] = bool(font.all_caps)
+
         try:
             color = font.color.rgb
             if color:
