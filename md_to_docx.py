@@ -647,7 +647,14 @@ class RI2013Converter:
                         break
 
                 # Проверка на разделительную строку таблицы
-                if len(table_lines) > 1 and re.match(r'^\|[\s\-:|]+\|$', table_lines[1]):
+                # Ищем разделитель на любой позиции (не только [1]) — для многоуровневых шапок
+                separator_idx = None
+                for sep_i, tl in enumerate(table_lines):
+                    if re.match(r'^\|[\s\-:|]+\|$', tl):
+                        separator_idx = sep_i
+                        break
+
+                if separator_idx is not None and len(table_lines) > separator_idx + 1:
                     # Проверяем, была ли подписана таблица (ищем "Таблица X.Y.Z" перед таблицей)
                     has_caption = False
                     for j in range(max(0, start_i - 5), start_i):
@@ -798,7 +805,7 @@ class RI2013Converter:
     
     def _add_table(self, table_lines, table_counter, section_num, chapter_num, skip_caption=False):
         """Добавление таблицы по НТД 01-2013 (п. 2.10)"""
-        data = self._parse_table_data(table_lines)
+        data, separator_cols = self._parse_table_data(table_lines)
         
         if not data or len(data) < 2:
             return
@@ -815,47 +822,83 @@ class RI2013Converter:
             if caption_paragraph.text.endswith('.'):
                 caption_paragraph.text = caption_paragraph.text[:-1]
         
-        # Определяем, есть ли строка нумерации граф после заголовка
+        # Определяем структуру шапки таблицы
         numbering_row_idx = None
-        if len(data) > 2 and self._is_numbering_row(data[1]):
-            numbering_row_idx = 1
-        
-        # Шапка таблицы: заголовок + опционально строка нумерации
-        if numbering_row_idx is not None:
+        is_multi_level = False
+        expanded_header = None
+        vmerge_per_row = {}
+        hmerge_per_row = {}
+
+        if len(data) >= 3:
+            is_multi_level, expanded_header, vmerge_per_row, hmerge_per_row = \
+                self._detect_multi_level_header(data, separator_cols)
+
+            if not is_multi_level:
+                if self._is_numbering_row(data[1]):
+                    numbering_row_idx = 1
+
+        elif len(data) == 2 and not self._is_numbering_row(data[1]):
+            is_multi_level, expanded_header, vmerge_per_row, hmerge_per_row = \
+                self._detect_multi_level_header(data, separator_cols)
+
+        # Формируем данные шапки и начало тела таблицы
+        header_row_count = len(expanded_header) if expanded_header else 0
+        if is_multi_level:
+            header_data = expanded_header
+            body_start = header_row_count
+        elif numbering_row_idx is not None:
             header_data = data[:2]
+            body_start = 2
         else:
             header_data = [data[0]]
-        
+            body_start = 1
+
         table_grid_style = self._resolve_style('table_grid')
-        header_table = self.doc.add_table(rows=len(header_data), cols=len(header_data[0]))
+        header_table = self.doc.add_table(rows=len(header_data), cols=separator_cols)
         header_table.style = table_grid_style
+
         self._setup_table_header(header_table, header_data[0])
-        if numbering_row_idx is not None:
+
+        if is_multi_level:
+            # Настраиваем все строки шапки кроме первой
+            for ri in range(1, len(header_data)):
+                self._setup_subheader_row(header_table, ri, header_data[ri])
+            # Применяем vMerge и gridSpan для каждой строки
+            self._apply_multi_level_merges(header_table, vmerge_per_row, hmerge_per_row, separator_cols)
+        elif numbering_row_idx is not None:
             self._setup_numbering_row(header_table, header_data[1])
         
-        # Настройка высоты строки 0 см, режим минимум (п. 2.10.8)
+        # Настройка высоты строки
         self._set_table_row_height(header_table, 0, 'minimum')
-        if numbering_row_idx is not None:
-            self._set_table_row_height(header_table, 1, 'minimum')
+        if numbering_row_idx is not None or is_multi_level:
+            for ri in range(1, len(header_data)):
+                self._set_table_row_height(header_table, ri, 'minimum')
         
-        # Отключение нижней границы шапки (п. 2.10.3) — с последней строки
-        last_header_row = header_table.rows[len(header_data) - 1]
-        self._remove_bottom_border(last_header_row)
-
         # Вычисление и установка одинаковых ширин колонок для шапки и тела
-        self._sync_column_widths(header_table, data)
+        # Объединяем данные шапки (расширенные) и тела для расчёта пропорций
+        full_data_for_widths = header_data + data[body_start:]
+        self._sync_column_widths(header_table, full_data_for_widths)
 
         # Основная таблица (без spacer — шапка и тело идут подряд)
-        body_start = (numbering_row_idx + 1) if numbering_row_idx is not None else 1
-        main_table = self.doc.add_table(rows=len(data) - body_start, cols=len(data[0]))
+        body_rows = len(data) - body_start
+        if body_rows < 1:
+            body_rows = 1
+        main_table = self.doc.add_table(rows=body_rows, cols=separator_cols)
         main_table.style = table_grid_style
         self._setup_main_table(main_table, data[body_start:], header_data[0])
 
         # Вертикальное объединение ячеек в первом столбце (fix #1)
         self._apply_vmerge(main_table, data[body_start:])
 
+        # Обработка строк-заголовков групп (gridSpan на всю ширину)
+        self._apply_group_header_spans(main_table, data[body_start:], separator_cols)
+
+        # Применяем gridSpan к строкам данных если шапка имеет gridSpan
+        if is_multi_level:
+            self._apply_data_row_gridspan(main_table, data[body_start:], separator_cols)
+
         # Установка одинаковых ширин колонок для тела таблицы
-        self._sync_column_widths(main_table, data)
+        self._sync_column_widths(main_table, full_data_for_widths)
 
         # Интервал после таблицы из конфига (п. 2.10.13)
         spacing_after = self.config.get('formatting_rules', {}).get('tables', {}).get('spacing_after_table_pt', 6)
@@ -927,12 +970,18 @@ class RI2013Converter:
         self._set_table_row_height(table, 1, 'minimum')
     
     def _parse_table_data(self, table_lines):
-        """Парсинг данных таблицы из Markdown"""
+        """Парсинг данных таблицы из Markdown.
+        
+        Returns:
+            tuple: (data, separator_cols) — 2D-массив данных и реальное число колонок из разделителя.
+        """
         data = []
+        separator_cols = 0
         
         for line in table_lines:
-            # Пропуск разделительной строки
+            # Разделительная строка — извлекаем число колонок
             if re.match(r'^\|[\s\-:|]+\|$', line):
+                separator_cols = line.count('|') - 1
                 continue
             
             # Извлечение ячеек (сохраняем пустые ячейки внутри строки)
@@ -946,15 +995,298 @@ class RI2013Converter:
             if cells:
                 data.append(cells)
 
-        # Нормализация длин строк: дополнение коротких строк пустыми ячейками
+        # Число колонок из разделителя; если разделителя нет — по максимальной строке
         if data:
             max_cols = max(len(row) for row in data)
+            if separator_cols == 0:
+                separator_cols = max_cols
+            else:
+                separator_cols = max(separator_cols, max_cols)
+            # Нормализация длин строк
             for row in data:
-                while len(row) < max_cols:
+                while len(row) < separator_cols:
                     row.append('')
         
-        return data
+        return data, separator_cols
     
+    # ------------------------------------------------------------------
+    # Многоуровневые шапки таблиц
+    # ------------------------------------------------------------------
+
+    def _detect_multi_level_header(self, data, separator_cols):
+        if len(data) < 2 or separator_cols <= 0:
+            return False, None, {}, {}
+
+        header_end = 1
+        for i in range(1, len(data)):
+            if self._is_numbering_row(data[i]):
+                header_end = i
+                break
+        else:
+            row0_orig = sum(1 for c in data[0] if c.strip())
+            if row0_orig < separator_cols and len(data) >= 3:
+                header_end = 2
+            else:
+                return False, None, {}, {}
+
+        if header_end < 2:
+            return False, None, {}, {}
+
+        header_rows = data[:header_end]
+        hmerge_per_row = {}
+        vmerge_per_row = {}
+
+        for row_idx in range(header_end - 1, -1, -1):
+            current_row = header_rows[row_idx]
+            ref_row = header_rows[row_idx + 1] if row_idx + 1 < header_end else None
+
+            curr_orig_len = 0
+            for i in range(len(current_row) - 1, -1, -1):
+                if current_row[i].strip():
+                    curr_orig_len = i + 1
+                    break
+
+            if curr_orig_len == 0:
+                continue
+
+            if ref_row is not None and curr_orig_len < separator_cols:
+                extra = separator_cols - curr_orig_len
+                ref_first_has_content = ref_row and ref_row[0].strip()
+                
+                if ref_first_has_content:
+                    vmerge_count = min(curr_orig_len, max(1, curr_orig_len - extra))
+                else:
+                    vmerge_count = 1
+
+                gridspan_count = curr_orig_len - vmerge_count
+
+                if vmerge_count > 0:
+                    vmerge_per_row[row_idx] = set(range(vmerge_count))
+
+                if gridspan_count > 0:
+                    remaining = separator_cols - vmerge_count
+                    cols_per_cell = remaining / gridspan_count
+                    spans = []
+                    col_pos = vmerge_count
+                    for idx in range(gridspan_count):
+                        start = col_pos
+                        end = vmerge_count + int((idx + 1) * cols_per_cell)
+                        if idx == gridspan_count - 1:
+                            end = separator_cols
+                        if end - start > 1:
+                            spans.append((start, end - start))
+                        col_pos = end
+                    if spans:
+                        hmerge_per_row[row_idx] = spans
+
+            elif ref_row is not None and curr_orig_len >= separator_cols:
+                vmerge_cols = set()
+                for col in range(separator_cols):
+                    curr_val = current_row[col].strip() if col < len(current_row) else ''
+                    ref_val = ref_row[col].strip() if col < len(ref_row) else ''
+                    if curr_val and not ref_val:
+                        vmerge_cols.add(col)
+                if vmerge_cols:
+                    vmerge_per_row[row_idx] = vmerge_cols
+
+        for row_idx in range(1, header_end):
+            if row_idx - 1 in vmerge_per_row:
+                for col in vmerge_per_row[row_idx - 1]:
+                    if row_idx not in vmerge_per_row:
+                        vmerge_per_row[row_idx] = set()
+                    vmerge_per_row[row_idx].add(col)
+
+        expanded_header = []
+        for row_idx in range(header_end):
+            row = header_rows[row_idx]
+            expanded = [''] * separator_cols
+            if row_idx in hmerge_per_row:
+                curr_orig = 0
+                for i in range(len(row) - 1, -1, -1):
+                    if row[i].strip():
+                        curr_orig = i + 1
+                        break
+                vmerge_count = len([c for c in vmerge_per_row.get(row_idx, set()) if c < curr_orig])
+                gridspan_count = curr_orig - vmerge_count
+
+                if gridspan_count > 0:
+                    spans = hmerge_per_row.get(row_idx, [])
+                    src_idx = vmerge_count
+                    for start, span in spans:
+                        val = row[src_idx] if src_idx < len(row) else ''
+                        for col in range(start, start + span):
+                            expanded[col] = val
+                        src_idx += 1
+
+                for col in vmerge_per_row.get(row_idx, set()):
+                    if col < len(row):
+                        expanded[col] = row[col]
+            else:
+                for i in range(min(len(row), separator_cols)):
+                    expanded[i] = row[i]
+            expanded_header.append(expanded)
+
+        return True, expanded_header, vmerge_per_row, hmerge_per_row
+    def _apply_multi_level_merges(self, table, vmerge_per_row, hmerge_per_row, separator_cols):
+        """Применяет vMerge и gridSpan для N-уровневой шапки.
+        
+        Args:
+            table: объект таблицы docx
+            vmerge_per_row: dict {row_idx: set(col_indices)} для vMerge
+            hmerge_per_row: dict {row_idx: [(start_col, span), ...]} для gridSpan
+            separator_cols: число колонок
+        """
+        ns = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
+        
+        # Применяем vMerge для каждой строки
+        for row_idx, cols in vmerge_per_row.items():
+            if row_idx >= len(table.rows):
+                continue
+            tr = table.rows[row_idx]._tr
+            tcs = tr.findall(ns + 'tc')
+            
+            for col in cols:
+                if col >= len(tcs):
+                    continue
+                tcPr = tcs[col].get_or_add_tcPr()
+                for existing in tcPr.findall(ns + 'vMerge'):
+                    tcPr.remove(existing)
+                vMerge = OxmlElement('w:vMerge')
+                # Определяем restart или continue
+                # Если это первая строка шапки или предыдущая строка не vmerge в этой колонке
+                is_restart = True
+                if row_idx > 0:
+                    prev_row_idx = row_idx - 1
+                    if prev_row_idx in vmerge_per_row and col in vmerge_per_row[prev_row_idx]:
+                        is_restart = False
+                if not is_restart:
+                    vMerge.set(qn('w:val'), 'continue')
+                tcPr.append(vMerge)
+        
+        # Применяем gridSpan для каждой строки
+        for row_idx, spans in hmerge_per_row.items():
+            if row_idx >= len(table.rows):
+                continue
+            tr = table.rows[row_idx]._tr
+            tcs = tr.findall(ns + 'tc')
+            
+            for start_col, span in spans:
+                if start_col >= len(tcs):
+                    continue
+                tc = tcs[start_col]
+                tcPr = tc.get_or_add_tcPr()
+                for existing in tcPr.findall(ns + 'gridSpan'):
+                    tcPr.remove(existing)
+                gridSpan = OxmlElement('w:gridSpan')
+                gridSpan.set(qn('w:val'), str(span))
+                tcPr.append(gridSpan)
+                
+                # Удаляем лишние ячейки
+                for offset in range(1, span):
+                    del_col = start_col + offset
+                    if del_col < len(tcs):
+                        tcs[del_col].getparent().remove(tcs[del_col])
+        
+        # Убираем нижнюю границу у последней строки шапки
+        if len(table.rows) > 0:
+            last_row = table.rows[len(table.rows) - 1]
+            self._remove_bottom_border(last_row)
+
+    def _apply_header_merges(self, table, vmerge_cols, hmerge_spans, separator_cols):
+        """Применяет vMerge и gridSpan к ячейкам шапки многоуровневой таблицы.
+        
+        Использует gridSpan (стандарт DOCX) для горизонтального объединения,
+        как в оригинальных документах ОБРАЗЕЦ.
+        
+        Args:
+            table: объект таблицы docx
+            vmerge_cols: множество колонок для vMerge (row0 ячейки над пустыми row1 ячейками)
+            hmerge_spans: список (start_col, span) для gridSpan в строке 0
+            separator_cols: число колонок
+        """
+        # Получаем ячейки через XML (надёжнее чем row.cells после модификаций)
+        row0_tr = table.rows[0]._tr
+        row1_tr = table.rows[1]._tr
+        row0_tcs = row0_tr.findall(qn('w:tc'))
+        row1_tcs = row1_tr.findall(qn('w:tc'))
+
+        # Вертикальное объединение (vMerge)
+        for col in vmerge_cols:
+            if col >= len(row0_tcs) or col >= len(row1_tcs):
+                continue
+
+            # Строка 0 — restart (без атрибута val)
+            tcPr_0 = row0_tcs[col].get_or_add_tcPr()
+            for existing in tcPr_0.findall(qn('w:vMerge')):
+                tcPr_0.remove(existing)
+            vMerge_restart = OxmlElement('w:vMerge')
+            tcPr_0.append(vMerge_restart)
+
+            # Строка 1 — continue
+            tcPr_1 = row1_tcs[col].get_or_add_tcPr()
+            for existing in tcPr_1.findall(qn('w:vMerge')):
+                tcPr_1.remove(existing)
+            vMerge_continue = OxmlElement('w:vMerge')
+            vMerge_continue.set(qn('w:val'), 'continue')
+            tcPr_1.append(vMerge_continue)
+
+        # Горизонтальное объединение через gridSpan (стандарт DOCX)
+        for start_col, span in hmerge_spans:
+            if start_col >= len(row0_tcs):
+                continue
+            tc = row0_tcs[start_col]
+            tcPr = tc.get_or_add_tcPr()
+            # Удаляем существующий gridSpan если есть
+            for existing in tcPr.findall(qn('w:gridSpan')):
+                tcPr.remove(existing)
+            gridSpan = OxmlElement('w:gridSpan')
+            gridSpan.set(qn('w:val'), str(span))
+            tcPr.append(gridSpan)
+            
+            # Удаляем hMerge если был (приоритет gridSpan)
+            for existing in tcPr.findall(qn('w:hMerge')):
+                tcPr.remove(existing)
+            
+            # Удаляем лишние ячейки-продолжения из XML (они не нужны при gridSpan)
+            # В DOCX gridSpan означает, что ячейка занимает N колонок,
+            # а лишние <w:tc> элементы в строке должны быть удалены
+            for offset in range(1, span):
+                del_col = start_col + offset
+                if del_col < len(row0_tcs):
+                    row0_tcs[del_col].getparent().remove(row0_tcs[del_col])
+
+        # Убираем нижнюю границу у последней строки шапки
+        last_header_row = table.rows[len(table.rows) - 1]
+        self._remove_bottom_border(last_header_row)
+
+    def _setup_subheader_row(self, table, row_idx, row_data):
+        """Настройка строки подзаголовков (второй уровень шапки).
+        
+        Форматирование аналогично основной шапке: жирный шрифт, центрирование.
+        """
+        row = table.rows[row_idx]
+        cell_fmt = self._get_table_cell_format()
+
+        for i, cell_text in enumerate(row_data):
+            if i >= len(row.cells):
+                break
+            cell_text = self._clean_text(cell_text)
+            cell = row.cells[i]
+            cell.text = cell_text
+
+            for paragraph in cell.paragraphs:
+                if cell_text:
+                    paragraph.text = cell_text
+                self._apply_cell_format(paragraph, cell_fmt, bold=True, alignment=WD_ALIGN_PARAGRAPH.CENTER)
+
+            cell.margin_left = Cm(0)
+            cell.margin_right = Cm(0)
+            cell.margin_top = Cm(0)
+            cell.margin_bottom = Cm(0)
+            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+
+        self._set_table_row_height(table, row_idx, 'minimum')
+
     def _setup_table_header(self, table, headers):
         """Настройка шапки таблицы (п. 2.10.3, 2.10.4)"""
         header_row = table.rows[0]
@@ -1076,9 +1408,17 @@ class RI2013Converter:
         # Отключение autofit и установка фиксированных ширин
         table.autofit = False
         for row in table.rows:
-            for i, cell in enumerate(row.cells):
+            tr = row._tr
+            tcs = tr.findall(qn('w:tc'))
+            for i, tc in enumerate(tcs):
                 if i < num_cols:
-                    cell.width = Cm(col_widths_cm[i])
+                    tcPr = tc.get_or_add_tcPr()
+                    tcW = tcPr.find(qn('w:tcW'))
+                    if tcW is None:
+                        tcW = OxmlElement('w:tcW')
+                        tcPr.append(tcW)
+                    tcW.set(qn('w:w'), str(int(Cm(col_widths_cm[i]) / 635)))
+                    tcW.set(qn('w:type'), 'dxa')
 
         # Установка ширины через tblGrid для надёжности
         tbl = table._tbl
@@ -1098,9 +1438,12 @@ class RI2013Converter:
             tblGrid.append(gridCol)
 
     def _remove_bottom_border(self, row):
-        """Отключение нижней границы шапки (п. 2.10.3)"""
-        for cell in row.cells:
-            tc = cell._tc
+        """Отключение нижней границы шапки (п. 2.10.3)
+        
+        Использует прямой доступ к XML для надёжности (row.cells может ломаться после merge-операций).
+        """
+        tr = row._tr
+        for tc in tr.findall(qn('w:tc')):
             tcPr = tc.get_or_add_tcPr()
             tcBorders = tcPr.first_child_found_in('w:tcBorders')
             if tcBorders is None:
@@ -1189,7 +1532,147 @@ class RI2013Converter:
                 vMerge = OxmlElement('w:vMerge')
                 vMerge.set(qn('w:val'), 'continue')
                 tcPr.append(vMerge)
-    
+
+    def _apply_group_header_spans(self, table, data, separator_cols):
+        """Обработка строк-заголовков групп с пустыми ячейками данных.
+        
+        Если строка таблицы содержит текст только в первом столбце, а остальные
+        ячейки пусты — это заголовок группы (например, "Число прибывших", "Женщины").
+        Применяет gridSpan к первой ячейке, чтобы она занимала всю ширину таблицы.
+        
+        Также применяет bold-форматирование к тексту заголовка группы.
+        """
+        if not data:
+            return
+
+        num_cols = separator_cols
+        cell_fmt = self._get_table_cell_format()
+
+        for row_idx, row_data in enumerate(data):
+            if row_idx >= len(table.rows):
+                break
+
+            if not row_data or len(row_data) < 2:
+                continue
+
+            first_cell_text = self._clean_text(row_data[0]).strip()
+            # Проверяем, что остальные ячейки пусты
+            rest_empty = all(
+                self._clean_text(c).strip() == ''
+                for c in row_data[1:]
+            )
+
+            if first_cell_text and rest_empty:
+                # Строка-заголовок группы — применяем gridSpan
+                tr = table.rows[row_idx]._tr
+                tcs = tr.findall(qn('w:tc'))
+                if not tcs:
+                    continue
+
+                first_tc = tcs[0]
+                tcPr = first_tc.get_or_add_tcPr()
+
+                # Удаляем существующий gridSpan
+                for existing in tcPr.findall(qn('w:gridSpan')):
+                    tcPr.remove(existing)
+
+                # Устанавливаем gridSpan = num_cols
+                gridSpan = OxmlElement('w:gridSpan')
+                gridSpan.set(qn('w:val'), str(num_cols))
+                tcPr.append(gridSpan)
+
+                # Удаляем лишние ячейки из XML (они не нужны при gridSpan)
+                for tc in tcs[1:]:
+                    tc.getparent().remove(tc)
+
+                # Форматируем текст заголовка группы: bold + centered
+                for p in first_tc.findall('.//' + qn('w:p')):
+                    for r in p.findall(qn('w:r')):
+                        rPr = r.get_or_add_rPr()
+                        bold = rPr.find(qn('w:b'))
+                        if bold is None:
+                            bold = OxmlElement('w:b')
+                            rPr.append(bold)
+
+                # Выравнивание по центру
+                for p in first_tc.findall('.//' + qn('w:p')):
+                    pPr = p.get_or_add_pPr()
+                    for existing in pPr.findall(qn('w:jc')):
+                        pPr.remove(existing)
+                    jc = OxmlElement('w:jc')
+                    jc.set(qn('w:val'), 'center')
+                    pPr.append(jc)
+
+                # Шрифт из конфига
+                font_name = cell_fmt.get('font_name', 'Times New Roman')
+                font_size = cell_fmt.get('font_size', 12)
+                for r in first_tc.findall('.//' + qn('w:r')):
+                    rPr = r.get_or_add_rPr()
+                    rFonts = rPr.find(qn('w:rFonts'))
+                    if rFonts is None:
+                        rFonts = OxmlElement('w:rFonts')
+                        rPr.append(rFonts)
+                    rFonts.set(qn('w:ascii'), font_name)
+                    rFonts.set(qn('w:hAnsi'), font_name)
+                    rFonts.set(qn('w:eastAsia'), font_name)
+                    sz = rPr.find(qn('w:sz'))
+                    if sz is None:
+                        sz = OxmlElement('w:sz')
+                        rPr.append(sz)
+                    sz.set(qn('w:val'), str(font_size * 2))  # half-points
+
+    def _apply_data_row_gridspan(self, table, data, separator_cols):
+        """Применяет gridSpan к строкам данных для выравнивания с шапкой.
+        
+        Если шапка таблицы имеет больше колонок (gridSpan), данные строки
+        должны получить соответствующий gridSpan чтобы столбцы совпадали.
+        """
+        if not data:
+            return
+
+        for row_idx, row_data in enumerate(data):
+            if row_idx >= len(table.rows):
+                break
+
+            num_cells = len(row_data)
+            if num_cells >= separator_cols:
+                continue  # Уже достаточно колонок
+
+            # Вычисляем gridSpan для каждой ячейки
+            extra = separator_cols - num_cells
+            if extra <= 0:
+                continue
+
+            tr = table.rows[row_idx]._tr
+            tcs = tr.findall(qn('w:tc'))
+
+            # Распределяем extra колонки: каждая ячейка получает 1 колонку,
+            # extra колонки распределяем пропорционально
+            cols_per_cell = separator_cols / num_cells
+            col_pos = 0
+
+            for ci in range(min(num_cells, len(tcs))):
+                start = col_pos
+                end = int((ci + 1) * cols_per_cell)
+                if ci == num_cells - 1:
+                    end = separator_cols
+                span = end - start
+                col_pos = end
+
+                if span > 1:
+                    tc = tcs[ci]
+                    tcPr = tc.get_or_add_tcPr()
+                    for existing in tcPr.findall(qn('w:gridSpan')):
+                        tcPr.remove(existing)
+                    gridSpan = OxmlElement('w:gridSpan')
+                    gridSpan.set(qn('w:val'), str(span))
+                    tcPr.append(gridSpan)
+
+            # Удаляем лишние ячейки если table имеет больше ячеек чем нужно
+            if len(tcs) > num_cells:
+                for tc in tcs[num_cells:]:
+                    tc.getparent().remove(tc)
+
     def _is_numeric(self, text):
         """Проверка является ли текст числовым значением"""
         if not text:
@@ -1247,7 +1730,11 @@ class RI2013Converter:
         # Убедимся, что numbering part существует
         self._ensure_numbering_part()
 
-        style_name = self._resolve_style('list')
+        # В ОБРАЗЕЦ bullet списки используют стиль Normal, нумерованные — List Paragraph
+        if list_type == 'bullet':
+            style_name = self._resolve_style('paragraph')
+        else:
+            style_name = self._resolve_style('list')
         paragraph = self.doc.add_paragraph(style=style_name)
 
         # Определяем numId: 100 = bullet, 101 = decimal
