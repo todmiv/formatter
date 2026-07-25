@@ -43,7 +43,6 @@ styles:
     enabled: true
     font:
       name: "Calibri Light"                             # Таблица 2.1 - основной шрифт Calibri Light
-      east_asia: "Times New Roman"                      # Таблица 2.1 - кириллица Times New Roman
       size: 16                                          # Таблица 2.1 - шрифт 16 пт
       bold: true                                        # Таблица 2.1 - полужирный
       italic: false                                     # Таблица 2.1 - без курсива
@@ -63,7 +62,6 @@ styles:
     enabled: true
     font:
       name: "Calibri Light"                             # Таблица 2.1 - основной шрифт Calibri Light
-      east_asia: "Times New Roman"                      # Таблица 2.1 - кириллица Times New Roman
       size: 14                                          # Таблица 2.1 - шрифт 14 пт
       bold: true                                        # Таблица 2.1 - полужирный
       italic: true                                      # Таблица 2.1 - курсив
@@ -82,7 +80,6 @@ styles:
     enabled: true
     font:
       name: "Cambria"                                   # Таблица 2.1 - шрифт Cambria
-      east_asia: "Times New Roman"                      # Таблица 2.1 - кириллица Times New Roman
       size: 13                                          # Таблица 2.1 - шрифт 13 пт
       bold: true                                        # Таблица 2.1 - полужирный
       italic: false                                     # Таблица 2.1 - без курсива
@@ -364,8 +361,11 @@ styles:
     font:
       name: "Times New Roman"                           # п. 2.14.4 - шрифт Times New Roman
       size: 12                                          # п. 2.14.2, 2.14.4 - размер 12-14 пт
+      # дефолты: space_before=0, space_after=0, line_spacing=1.0, alignment=left, indent=0
       bold: true                                        # п. 2.14.6 - жирный шрифт
+      # дефолты: space_before=0, space_after=0, line_spacing=1.0, alignment=left, indent=0
       italic: false                                     # п. 2.14.6 - без курсива
+      # дефолты: space_before=0, space_after=0, line_spacing=1.0, alignment=left, indent=0
       character_spacing: 1.5                            # п. 2.14.6 - с разрядкой
     paragraph:
       alignment: "right"                                # п. 2.14.2 - номер страницы в верхнем правом углу
@@ -385,8 +385,11 @@ styles:
     font:
       name: "Times New Roman"                           # п. 2.14.4 - шрифт Times New Roman
       size: 12                                          # п. 2.14.4 - размер 12-14 пт
+      # дефолты: space_before=0, space_after=0, line_spacing=1.0, alignment=left, indent=0
       bold: true                                        # п. 2.14.6 - жирный шрифт
+      # дефолты: space_before=0, space_after=0, line_spacing=1.0, alignment=left, indent=0
       italic: false                                     # п. 2.14.6 - без курсива
+      # дефолты: space_before=0, space_after=0, line_spacing=1.0, alignment=left, indent=0
       character_spacing: 1.5                            # п. 2.14.6 - с разрядкой
     paragraph:
       alignment: "center"                               # п. 2.14.4 - по центру
@@ -472,6 +475,7 @@ headers_footers:
     alignment: "center"                                 # п. 2.14.4 - по центру
     style: "uppercase_spaced"                           # п. 2.14.4 - прописными буквами с разрядкой
     bold: true                                          # п. 2.14.6 - жирный шрифт
+      # дефолты: space_before=0, space_after=0, line_spacing=1.0, alignment=left, indent=0
     character_spacing: 1.5                              # п. 2.14.6 - с разрядкой
     section_break_independent: true                     # п. 2.14.4 - для разных разделов разные колонтитулы
 
@@ -610,6 +614,7 @@ formatting_rules:
     # -------------------------------------------------------------------------
     # Интервалы
     # -------------------------------------------------------------------------
+      # дефолты: space_before=0, space_after=0, line_spacing=1.0, alignment=left, indent=0
     spacing:
       after_table_pt: 6                                 # п. 2.10.13 - текст после таблицы 6 пт
       before_note_pt: 0                                 # п. 2.10.14, 2.12.4 - перед примечанием 0 пт

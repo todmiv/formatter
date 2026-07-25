@@ -198,7 +198,7 @@ class RI2013Converter:
                     'font': {'name': 'Times New Roman', 'size': 12, 'bold': False, 'italic': False},
                     'paragraph': {
                         'first_line_indent_cm': 1.25,
-                        'line_spacing': 1.15,
+                        'line_spacing': 1.0,
                         'space_before_pt': 0,
                         'space_after_pt': 0,
                         'alignment': 'justify'
@@ -208,9 +208,9 @@ class RI2013Converter:
                     'font': {'name': 'Calibri Light', 'size': 16, 'bold': True, 'italic': False},
                     'paragraph': {
                         'first_line_indent_cm': 0,
-                        'line_spacing': 1.25,
+                        'line_spacing': 1.0,
                         'space_before_pt': 12,
-                        'space_after_pt': 3,
+                        'space_after_pt': 0,
                         'alignment': 'left',
                         'page_break_before': True
                     }
@@ -219,9 +219,9 @@ class RI2013Converter:
                     'font': {'name': 'Calibri Light', 'size': 14, 'bold': True, 'italic': False},
                     'paragraph': {
                         'first_line_indent_cm': 0,
-                        'line_spacing': 1.25,
-                        'space_before_pt': 12,
-                        'space_after_pt': 3,
+                        'line_spacing': 1.0,
+                        'space_before_pt': 6,
+                        'space_after_pt': 0,
                         'alignment': 'left'
                     }
                 },
@@ -229,9 +229,9 @@ class RI2013Converter:
                     'font': {'name': 'Cambria', 'size': 13, 'bold': True, 'italic': False},
                     'paragraph': {
                         'first_line_indent_cm': 0,
-                        'line_spacing': 1.15,
+                        'line_spacing': 1.0,
                         'space_before_pt': 12,
-                        'space_after_pt': 3,
+                        'space_after_pt': 0,
                         'alignment': 'left'
                     }
                 },
@@ -239,7 +239,7 @@ class RI2013Converter:
                     'font': {'name': 'Times New Roman', 'size': 12, 'bold': False, 'italic': False},
                     'paragraph': {
                         'first_line_indent_cm': 1.25,
-                        'line_spacing': 1.25,
+                        'line_spacing': 1.0,
                         'space_before_pt': 0,
                         'space_after_pt': 0,
                         'alignment': 'left'
@@ -261,7 +261,7 @@ class RI2013Converter:
                         'first_line_indent_cm': 0,
                         'line_spacing': 1.0,
                         'space_before_pt': 0,
-                        'space_after_pt': 6,
+                        'space_after_pt': 0,
                         'alignment': 'left'
                     }
                 },
@@ -279,7 +279,7 @@ class RI2013Converter:
                     'font': {'name': 'Times New Roman', 'size': 12, 'bold': False, 'italic': False},
                     'paragraph': {
                         'first_line_indent_cm': 0,
-                        'line_spacing': 1.15,
+                        'line_spacing': 1.0,
                         'space_before_pt': 0,
                         'space_after_pt': 0,
                         'alignment': 'left'
@@ -310,7 +310,7 @@ class RI2013Converter:
                     'alignment': 'right'
                 },
                 'footer': {
-                    'enabled': True,
+                    'enabled': False,
                     'position_from_edge_cm': 1.0,
                     'content': 'section_chapter_number',
                     'alignment': 'center'
@@ -322,7 +322,7 @@ class RI2013Converter:
                     'header_row_height_mode': 'minimum',
                     'auto_fit_window': True,
                     'fixed_column_width': True,
-                    'spacing_after_table_pt': 6,
+                    'spacing_after_table_pt': 0,
                     'spacing_before_note_pt': 0,
                     'header_repeat_on_pages': True,
                     'column_numbering': True
@@ -901,7 +901,7 @@ class RI2013Converter:
         self._sync_column_widths(main_table, full_data_for_widths)
 
         # Интервал после таблицы из конфига (п. 2.10.13)
-        spacing_after = self.config.get('formatting_rules', {}).get('tables', {}).get('spacing_after_table_pt', 6)
+        spacing_after = self.config.get('formatting_rules', {}).get('tables', {}).get('spacing_after_table_pt', 0)
         if main_table.rows:
             last_row = main_table.rows[-1]
             for cell in last_row.cells:
@@ -1348,8 +1348,8 @@ class RI2013Converter:
                     cell.margin_top = Cm(0)
                     cell.margin_bottom = Cm(0)
 
-                    # Выравнивание сверху (п. 2.10.7)
-                    cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+                    # Выравнивание сверху (п. 2.10.7) - по замечанию эксперта
+                    cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
 
             # Настройка высоты строки (п. 2.10.8)
             self._set_table_row_height(table, row_idx, 'minimum')
