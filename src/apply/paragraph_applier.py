@@ -85,6 +85,7 @@ class ParagraphApplier(BaseApplier):
                     logger.debug(f"Стиль {target_style_name} применен к {container} {issue.location}")
                 except Exception as e:
                     logger.warning(f"Не удалось применить стиль {target_style_name}: {e}")
+                    return False
 
             # Точечно применяем свойства, указанные в payload, если нужно форсировать
             if apply_direct_overrides:
@@ -153,7 +154,12 @@ class ParagraphApplier(BaseApplier):
 
                     # Применяем стиль
                     if apply_styles:
-                        para.style = target_style_name
+                        try:
+                            para.style = target_style_name
+                        except Exception as e:
+                            logger.warning(f"Не удалось применить стиль {target_style_name} к параграфу {idx}: {e}")
+                            failed += 1
+                            continue
 
                     # Прямые переопределения
                     if apply_direct_overrides:

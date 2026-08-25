@@ -8,7 +8,7 @@ from src.core.config_loader import ConfigLoader
 
 def test_preview_logic():
     # Используем существующий тестовый файл
-    doc_path = 'test_output.docx'
+    doc_path = 'tests/test_output.docx'
     if not os.path.exists(doc_path):
         # Попробуем найти другой
         docx_files = [f for f in os.listdir('.') if f.lower().endswith('.docx')]

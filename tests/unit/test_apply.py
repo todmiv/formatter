@@ -12,7 +12,7 @@ from src.apply.apply_orchestrator import ApplyOrchestrator
 
 def main():
     config_path = 'configs/active/config.yaml'
-    doc_path = 'test_output.docx'
+    doc_path = 'tests/test_output.docx'
     output_path = 'test_output_fixed.docx'
     
     print("=== Тест ApplyEngine ===")

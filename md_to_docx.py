@@ -288,7 +288,7 @@ class RI2013Converter:
             },
             'page_setup': {
                 'portrait': {
-                    'left_margin_cm': 2.5,
+                    'left_margin_cm': 2.0,
                     'right_margin_cm': 1.0,
                     'top_margin_cm': 2.0,
                     'bottom_margin_cm': 2.0
@@ -296,7 +296,7 @@ class RI2013Converter:
                 'landscape': {
                     'left_margin_cm': 2.0,
                     'right_margin_cm': 2.0,
-                    'top_margin_cm': 2.5,
+                    'top_margin_cm': 2.0,
                     'bottom_margin_cm': 1.0
                 },
                 'paper_size': 'A4',
@@ -307,7 +307,12 @@ class RI2013Converter:
                     'enabled': True,
                     'position_from_edge_cm': 1.0,
                     'content': 'page_number',
-                    'alignment': 'right'
+                    'alignment': 'right',
+                    'font': {
+                        'name': 'Times New Roman',
+                        'size': 12,
+                        'bold': False
+                    }
                 },
                 'footer': {
                     'enabled': False,
@@ -561,20 +566,13 @@ class RI2013Converter:
 
             # Подпись таблицы: **Таблица X.Y.Z** или Таблица X.Y.Z или **Название**
             if re.match(r'^(\*\*)?Таблица\s+\d+', line) or re.match(r'^\*\*Перечень\s+', line):
-                # Извлекаем номер таблицы из подписи (если есть)
+                # Извлекаем номер таблицы из подписи (если есть).
+                # Нумерация сквозная (п. 2.10.2): при ручной подписи «Таблица N»
+                # (или legacy «Таблица X.Y») счётчик продолжается с последнего числа.
                 num_match = re.search(r'Таблица\s+(\d+[\.\d]*)', line)
                 if num_match:
-                    existing_num = num_match.group(1)
-                    parts = existing_num.split('.')
-                    if len(parts) >= 3:
-                        self._current_section = int(parts[0])
-                        self._current_chapter = int(parts[1])
-                        table_counter['current'] = int(parts[2])
-                    elif len(parts) == 2:
-                        self._current_section = int(parts[0])
-                        table_counter['current'] = int(parts[1])
-                    else:
-                        table_counter['current'] = int(parts[0])
+                    parts = num_match.group(1).split('.')
+                    table_counter['current'] = int(parts[-1])
                 self._add_caption(line)
                 caption_added = True
                 last_caption_text = line.strip()
@@ -812,10 +810,8 @@ class RI2013Converter:
         
         if not skip_caption and len(data) > 2:
             table_num = table_counter['current']
-            if chapter_num > 0:
-                table_title = f"Таблица {section_num}.{chapter_num}.{table_num}"
-            else:
-                table_title = f"Таблица {section_num}.{table_num}"
+            # Сквозная нумерация таблиц (п. 2.10.2 НТД 01-2013 август 2026)
+            table_title = f"Таблица {table_num}"
             
             caption_style = self._resolve_style('caption')
             caption_paragraph = self.doc.add_paragraph(table_title, style=caption_style)
@@ -854,56 +850,56 @@ class RI2013Converter:
             body_start = 1
 
         table_grid_style = self._resolve_style('table_grid')
-        header_table = self.doc.add_table(rows=len(header_data), cols=separator_cols)
-        header_table.style = table_grid_style
-
-        self._setup_table_header(header_table, header_data[0])
-
-        if is_multi_level:
-            # Настраиваем все строки шапки кроме первой
-            for ri in range(1, len(header_data)):
-                self._setup_subheader_row(header_table, ri, header_data[ri])
-            # Применяем vMerge и gridSpan для каждой строки
-            self._apply_multi_level_merges(header_table, vmerge_per_row, hmerge_per_row, separator_cols)
-        elif numbering_row_idx is not None:
-            self._setup_numbering_row(header_table, header_data[1])
-        
-        # Настройка высоты строки
-        self._set_table_row_height(header_table, 0, 'minimum')
-        if numbering_row_idx is not None or is_multi_level:
-            for ri in range(1, len(header_data)):
-                self._set_table_row_height(header_table, ri, 'minimum')
-        
-        # Вычисление и установка одинаковых ширин колонок для шапки и тела
-        # Объединяем данные шапки (расширенные) и тела для расчёта пропорций
-        full_data_for_widths = header_data + data[body_start:]
-        self._sync_column_widths(header_table, full_data_for_widths)
-
-        # Основная таблица (без spacer — шапка и тело идут подряд)
+        header_row_count = len(header_data)
         body_rows = len(data) - body_start
         if body_rows < 1:
             body_rows = 1
-        main_table = self.doc.add_table(rows=body_rows, cols=separator_cols)
-        main_table.style = table_grid_style
-        self._setup_main_table(main_table, data[body_start:], header_data[0])
+
+        # Единая таблица: шапка и тело в одной таблице (НТД 01-2013 август 2026,
+        # п. 2.10.4 — шапка оформляется жирным шрифтом по центру, без разделения)
+        table = self.doc.add_table(rows=header_row_count + body_rows, cols=separator_cols)
+        table.style = table_grid_style
+
+        # Шапка таблицы (п. 2.10.4)
+        self._setup_table_header(table, header_data[0])
+
+        if is_multi_level:
+            # Настраиваем все строки шапки кроме первой
+            for ri in range(1, header_row_count):
+                self._setup_subheader_row(table, ri, header_data[ri])
+            # Применяем vMerge и gridSpan для каждой строки
+            self._apply_multi_level_merges(table, vmerge_per_row, hmerge_per_row, separator_cols)
+        elif numbering_row_idx is not None:
+            self._setup_numbering_row(table, header_data[1])
+
+        # Настройка высоты строк шапки (п. 2.10.9)
+        for ri in range(header_row_count):
+            self._set_table_row_height(table, ri, 'minimum')
+
+        # Вычисление и установка одинаковых ширин колонок (шапка + тело)
+        full_data_for_widths = header_data + data[body_start:]
+        self._sync_column_widths(table, full_data_for_widths)
+
+        # Тело таблицы
+        self._setup_main_table(table, data[body_start:], header_data[0], start_row=header_row_count)
 
         # Вертикальное объединение ячеек в первом столбце (fix #1)
-        self._apply_vmerge(main_table, data[body_start:])
+        self._apply_vmerge(table, data[body_start:], start_row=header_row_count)
 
         # Обработка строк-заголовков групп (gridSpan на всю ширину)
-        self._apply_group_header_spans(main_table, data[body_start:], separator_cols)
+        self._apply_group_header_spans(table, data[body_start:], separator_cols, start_row=header_row_count)
 
         # Применяем gridSpan к строкам данных если шапка имеет gridSpan
         if is_multi_level:
-            self._apply_data_row_gridspan(main_table, data[body_start:], separator_cols)
+            self._apply_data_row_gridspan(table, data[body_start:], separator_cols, start_row=header_row_count)
 
-        # Установка одинаковых ширин колонок для тела таблицы
-        self._sync_column_widths(main_table, full_data_for_widths)
+        # Повтор шапки на следующих страницах (п. 2.10.4)
+        self._repeat_header_on_pages(table, header_row_count)
 
-        # Интервал после таблицы из конфига (п. 2.10.13)
+        # Интервал после таблицы из конфига (п. 2.10.14: 0 пт)
         spacing_after = self.config.get('formatting_rules', {}).get('tables', {}).get('spacing_after_table_pt', 0)
-        if main_table.rows:
-            last_row = main_table.rows[-1]
+        if table.rows:
+            last_row = table.rows[-1]
             for cell in last_row.cells:
                 for para in cell.paragraphs:
                     para.paragraph_format.space_after = Pt(spacing_after)
@@ -1186,11 +1182,6 @@ class RI2013Converter:
                     del_col = start_col + offset
                     if del_col < len(tcs):
                         tcs[del_col].getparent().remove(tcs[del_col])
-        
-        # Убираем нижнюю границу у последней строки шапки
-        if len(table.rows) > 0:
-            last_row = table.rows[len(table.rows) - 1]
-            self._remove_bottom_border(last_row)
 
     def _apply_header_merges(self, table, vmerge_cols, hmerge_spans, separator_cols):
         """Применяет vMerge и gridSpan к ячейкам шапки многоуровневой таблицы.
@@ -1315,12 +1306,19 @@ class RI2013Converter:
             # Выравнивание по центру сверху (п. 2.10.7)
             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
 
-    def _setup_main_table(self, table, data, headers):
-        """Настройка основной таблицы (п. 2.10)"""
+    def _setup_main_table(self, table, data, headers, start_row=0):
+        """Настройка основной таблицы (п. 2.10)
+
+        Args:
+            table: объект таблицы docx
+            data: строки тела таблицы
+            headers: строка заголовков
+            start_row: индекс первой строки тела в общей таблице (после шапки)
+        """
         cell_fmt = self._get_table_cell_format()
 
         for row_idx, row_data in enumerate(data):
-            row = table.rows[row_idx]
+            row = table.rows[start_row + row_idx]
 
             for col_idx, cell_text in enumerate(row_data):
                 if col_idx < len(row.cells):
@@ -1348,17 +1346,14 @@ class RI2013Converter:
                     cell.margin_top = Cm(0)
                     cell.margin_bottom = Cm(0)
 
-                    # Выравнивание сверху (п. 2.10.7) - по замечанию эксперта
+                    # Выравнивание сверху (п. 2.10.8) - по замечанию эксперта
                     cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
 
-            # Настройка высоты строки (п. 2.10.8)
-            self._set_table_row_height(table, row_idx, 'minimum')
+            # Настройка высоты строки (п. 2.10.9)
+            self._set_table_row_height(table, start_row + row_idx, 'minimum')
 
-        # Автоподбор по ширине окна (п. 2.10.9)
+        # Автоподбор по ширине окна (п. 2.10.10)
         table.autofit = True
-
-        # Повтор заголовков на следующих страницах (п. 2.10.5)
-        self._repeat_header_on_pages(table)
     
     def _set_table_row_height(self, table, row_idx, mode='minimum'):
         """Установка высоты строки таблицы (п. 2.10.8)"""
@@ -1461,20 +1456,29 @@ class RI2013Converter:
             # Добавляем номер графы в первую ячейку если нужно
             pass
     
-    def _repeat_header_on_pages(self, table):
-        """Повтор заголовков на следующих страницах (п. 2.10.5)"""
-        tbl = table._tbl
-        tblPr = tbl.tblPr
-        tblHeader = OxmlElement('w:tblHeader')
-        tblPr.append(tblHeader)
+    def _repeat_header_on_pages(self, table, header_row_count=1):
+        """Повтор шапки на следующих страницах (п. 2.10.4).
 
-    def _apply_vmerge(self, table, data):
+        Отмечает первые header_row_count строк таблицы как повторяемые.
+        """
+        for row_idx in range(header_row_count):
+            tr = table.rows[row_idx]._tr
+            trPr = tr.get_or_add_trPr()
+            tblHeader = OxmlElement('w:tblHeader')
+            trPr.append(tblHeader)
+
+    def _apply_vmerge(self, table, data, start_row=0):
         """Вертикальное объединение ячеек в первом столбце (fix #1).
-        
+
         Алгоритм:
         1. Группирует строки по одинаковым значениям в первом столбце
         2. Группа из 2+ строк: первая получает vMerge (restart), остальные — continue
         3. Группа из 1 строки: без изменений
+
+        Args:
+            table: объект таблицы docx
+            data: строки тела таблицы
+            start_row: индекс первой строки тела в общей таблице (после шапки)
         """
         if not data or len(data) < 2:
             return
@@ -1512,7 +1516,7 @@ class RI2013Converter:
                 continue
 
             # Первая ячейка группы — restart (без атрибута val)
-            first_cell = table.rows[start].cells[0]
+            first_cell = table.rows[start_row + start].cells[0]
             first_tc = first_cell._tc
             first_tcPr = first_tc.get_or_add_tcPr()
             for existing in first_tcPr.findall(qn('w:vMerge')):
@@ -1522,9 +1526,9 @@ class RI2013Converter:
 
             # Остальные ячейки группы — continue
             for row_idx in range(start + 1, end + 1):
-                if row_idx >= len(table.rows):
+                if start_row + row_idx >= len(table.rows):
                     break
-                cell = table.rows[row_idx].cells[0]
+                cell = table.rows[start_row + row_idx].cells[0]
                 tc = cell._tc
                 tcPr = tc.get_or_add_tcPr()
                 for existing in tcPr.findall(qn('w:vMerge')):
@@ -1533,7 +1537,7 @@ class RI2013Converter:
                 vMerge.set(qn('w:val'), 'continue')
                 tcPr.append(vMerge)
 
-    def _apply_group_header_spans(self, table, data, separator_cols):
+    def _apply_group_header_spans(self, table, data, separator_cols, start_row=0):
         """Обработка строк-заголовков групп с пустыми ячейками данных.
         
         Если строка таблицы содержит текст только в первом столбце, а остальные
@@ -1541,6 +1545,12 @@ class RI2013Converter:
         Применяет gridSpan к первой ячейке, чтобы она занимала всю ширину таблицы.
         
         Также применяет bold-форматирование к тексту заголовка группы.
+
+        Args:
+            table: объект таблицы docx
+            data: строки тела таблицы
+            separator_cols: число колонок
+            start_row: индекс первой строки тела в общей таблице (после шапки)
         """
         if not data:
             return
@@ -1549,7 +1559,7 @@ class RI2013Converter:
         cell_fmt = self._get_table_cell_format()
 
         for row_idx, row_data in enumerate(data):
-            if row_idx >= len(table.rows):
+            if start_row + row_idx >= len(table.rows):
                 break
 
             if not row_data or len(row_data) < 2:
@@ -1564,7 +1574,7 @@ class RI2013Converter:
 
             if first_cell_text and rest_empty:
                 # Строка-заголовок группы — применяем gridSpan
-                tr = table.rows[row_idx]._tr
+                tr = table.rows[start_row + row_idx]._tr
                 tcs = tr.findall(qn('w:tc'))
                 if not tcs:
                     continue
@@ -1621,17 +1631,23 @@ class RI2013Converter:
                         rPr.append(sz)
                     sz.set(qn('w:val'), str(font_size * 2))  # half-points
 
-    def _apply_data_row_gridspan(self, table, data, separator_cols):
+    def _apply_data_row_gridspan(self, table, data, separator_cols, start_row=0):
         """Применяет gridSpan к строкам данных для выравнивания с шапкой.
         
         Если шапка таблицы имеет больше колонок (gridSpan), данные строки
         должны получить соответствующий gridSpan чтобы столбцы совпадали.
+
+        Args:
+            table: объект таблицы docx
+            data: строки тела таблицы
+            separator_cols: число колонок
+            start_row: индекс первой строки тела в общей таблице (после шапки)
         """
         if not data:
             return
 
         for row_idx, row_data in enumerate(data):
-            if row_idx >= len(table.rows):
+            if start_row + row_idx >= len(table.rows):
                 break
 
             num_cells = len(row_data)
@@ -1643,7 +1659,7 @@ class RI2013Converter:
             if extra <= 0:
                 continue
 
-            tr = table.rows[row_idx]._tr
+            tr = table.rows[start_row + row_idx]._tr
             tcs = tr.findall(qn('w:tc'))
 
             # Распределяем extra колонки: каждая ячейка получает 1 колонку,
@@ -1943,8 +1959,8 @@ def main():
     else:
         docx_path = '(ГЕНЕРАЦИЯ) Том II Черкесск Демография.docx'
     
-    # Конфигурация
-    config_path = 'configs/active/config.yaml'
+    # Конфигурация (3-й аргумент CLI, по умолчанию — configs/active/config.yaml)
+    config_path = sys.argv[3] if len(sys.argv) > 3 else 'configs/active/config.yaml'
     
     # Конвертация
     converter = RI2013Converter(config_path)
@@ -1953,7 +1969,8 @@ def main():
     print(f"\n📋 Отчёт о конвертации:")
     print(f"   Исходный файл: {md_path}")
     print(f"   Результат: {docx_path}")
-    print(f"   Стандарт: НТД 01-2013 Редакция 4")
+    print(f"   Конфигурация: {config_path}")
+    print(f"   Стандарт: НТД 01-2013 (август 2026)")
     print(f"   Дата: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 

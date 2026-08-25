@@ -19,6 +19,7 @@ import copy
 import logging
 import argparse
 import contextlib
+import zipfile
 from typing import Dict, Any, Optional, List
 from docx import Document
 from docx.oxml.ns import qn
@@ -76,6 +77,7 @@ class StyleApplier:
         copy_headers_footers: bool = True,
         clear_direct_formatting: bool = False,
         styles_filter: Optional[List[str]] = None,
+        replace_styles_raw: bool = False,
     ) -> Dict[str, Any]:
         """
         Применяет стили из шаблона к целевому документу.
@@ -87,6 +89,7 @@ class StyleApplier:
         :param copy_headers_footers: копировать колонтитулы (True по умолчанию).
         :param clear_direct_formatting: очистить прямое форматирование перед применением.
         :param styles_filter: список стилей для копирования. Если None, все.
+        :param replace_styles_raw: полная замена styles.xml на уровне ZIP (метод ReplaceStyles).
         :return: статистика {'styles_applied': int, 'pages_configured': bool, 'headers_footers_copied': bool}
         """
         self._load_template()
@@ -94,29 +97,38 @@ class StyleApplier:
         if not os.path.exists(target_path):
             raise FileNotFoundError(f"Целевой файл не найден: {target_path}")
 
-        target_doc = Document(target_path)
-
         stats = {
             'styles_applied': 0,
             'pages_configured': False,
             'headers_footers_copied': False,
         }
 
-        if clear_direct_formatting:
-            self._clear_all_direct_formatting(target_doc)
-
-        if copy_styles:
-            stats['styles_applied'] = self._copy_styles(target_doc, styles_filter)
-
-        if copy_page_setup:
-            stats['pages_configured'] = self._copy_page_setup(target_doc)
-
-        if copy_headers_footers:
-            stats['headers_footers_copied'] = self._copy_headers_footers(target_doc)
-
         save_path = output_path if output_path else target_path
         os.makedirs(os.path.dirname(save_path) or '.', exist_ok=True)
-        target_doc.save(save_path)
+
+        if replace_styles_raw:
+            import shutil
+            if save_path != target_path:
+                shutil.copy2(target_path, save_path)
+            self._replace_styles_raw(self.template_path, save_path)
+            stats['styles_applied'] = -1
+            logger.info("Стили заменены целиком (raw XML replacement)")
+        else:
+            target_doc = Document(target_path)
+
+            if clear_direct_formatting:
+                self._clear_all_direct_formatting(target_doc)
+
+            if copy_styles:
+                stats['styles_applied'] = self._copy_styles(target_doc, styles_filter)
+
+            if copy_page_setup:
+                stats['pages_configured'] = self._copy_page_setup(target_doc)
+
+            if copy_headers_footers:
+                stats['headers_footers_copied'] = self._copy_headers_footers(target_doc)
+
+            target_doc.save(save_path)
 
         self._unload_template()
 
@@ -423,6 +435,55 @@ class StyleApplier:
         logger.debug("Прямое форматирование очищено")
 
     # ------------------------------------------------------------------
+    # Полная замена styles.xml (метод ReplaceStyles)
+    # ------------------------------------------------------------------
+
+    STYLE_PARTS = [
+        ('word/styles.xml', 'word/styles.xml'),
+        ('word/stylesWithEffects.xml', 'word/stylesWithEffects.xml'),
+    ]
+
+    def _replace_styles_raw(self, source_path: str, target_path: str) -> None:
+        """
+        Полная замена styles.xml на уровне ZIP-архива.
+        Аналог C# ReplaceStyles из Open XML SDK.
+
+        Извлекает styles.xml и stylesWithEffects.xml из документа-источника
+        и заменяет их в целевом документе.
+
+        :param source_path: путь к DOCX-источнику стилей.
+        :param target_path: путь к целевому DOCX (файл должен существовать).
+        """
+        source_styles = {}
+        with zipfile.ZipFile(source_path, 'r') as src_zip:
+            for archive_name, _ in self.STYLE_PARTS:
+                try:
+                    source_styles[archive_name] = src_zip.read(archive_name)
+                except KeyError:
+                    pass
+
+        if not source_styles:
+            raise FileNotFoundError(
+                f"В документе-источнике не найдены части стилей "
+                f"(ни styles.xml, ни stylesWithEffects.xml): {source_path}"
+            )
+
+        tmp_path = target_path + '.tmp'
+        with zipfile.ZipFile(target_path, 'r') as tgt_zip:
+            with zipfile.ZipFile(tmp_path, 'w', zipfile.ZIP_DEFLATED) as out_zip:
+                for item in tgt_zip.infolist():
+                    archive_name = item.filename
+                    if archive_name in source_styles:
+                        out_zip.writestr(item, source_styles[archive_name])
+                    else:
+                        out_zip.writestr(item, tgt_zip.read(archive_name))
+
+        os.replace(tmp_path, target_path)
+
+        replaced = ', '.join(source_styles.keys())
+        logger.debug(f"Raw XML замена выполнена для: {replaced}")
+
+    # ------------------------------------------------------------------
     # Сравнение документов
     # ------------------------------------------------------------------
 
@@ -542,6 +603,11 @@ def main():
         help='Очистить прямое форматирование перед применением'
     )
     parser.add_argument(
+        '--replace-raw',
+        action='store_true',
+        help='Полная замена styles.xml на уровне ZIP (метод ReplaceStyles)'
+    )
+    parser.add_argument(
         '--diff',
         action='store_true',
         help='Показать расхождения между шаблоном и целевым документом'
@@ -580,15 +646,19 @@ def main():
         copy_page_setup=not args.no_page_setup,
         copy_headers_footers=not args.no_headers_footers,
         clear_direct_formatting=args.clear_formatting,
+        replace_styles_raw=args.replace_raw,
     )
 
     output = args.output or args.target
     print(f"\nСтили применены из: {args.template}")
     print(f"Целевой документ: {args.target}")
     print(f"Результат сохранён: {output}")
-    print(f"  Скопировано стилей: {stats['styles_applied']}")
-    print(f"  Настройки страницы: {'скопированы' if stats['pages_configured'] else 'без изменений'}")
-    print(f"  Колонтитулы: {'скопированы' if stats['headers_footers_copied'] else 'без изменений'}")
+    if args.replace_raw:
+        print(f"  Режим: полная замена styles.xml (ReplaceStyles)")
+    else:
+        print(f"  Скопировано стилей: {stats['styles_applied']}")
+        print(f"  Настройки страницы: {'скопированы' if stats['pages_configured'] else 'без изменений'}")
+        print(f"  Колонтитулы: {'скопированы' if stats['headers_footers_copied'] else 'без изменений'}")
 
     return 0
 

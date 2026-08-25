@@ -1,4 +1,4 @@
-﻿# Python
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -54,6 +54,10 @@ venv.bak/
 *.swo
 *~
 
+# Инструменты разработки
+.mimocode/
+.qwen/
+
 # OS
 .DS_Store
 Thumbs.db
@@ -62,6 +66,7 @@ Thumbs.db
 formatter.log
 *.log
 *.docx
+*.doc
 *.json
 *.ico
 *.spec

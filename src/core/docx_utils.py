@@ -94,7 +94,9 @@ def get_paragraph_spacing_twips(paragraph: Paragraph) -> Dict[str, int]:
 def get_paragraph_alignment(paragraph: Paragraph) -> str:
     """
     Возвращает выравнивание параграфа в виде строки ('left', 'center', 'right', 'justify').
+    Учитывает наследование от стиля, если нет прямого форматирования.
     """
+    # 1. Прямое форматирование параграфа (pPr/w:jc)
     pPr = paragraph._element.pPr
     if pPr is not None:
         jc_elem = pPr.find(qn('w:jc'))
@@ -102,6 +104,23 @@ def get_paragraph_alignment(paragraph: Paragraph) -> str:
             val = jc_elem.get(qn('w:val'))
             if val:
                 return ALIGNMENT_MAP.get(val, 'left')
+
+    # 2. Наследование от стиля
+    try:
+        style_align = paragraph.style.paragraph_format.alignment
+        if style_align is not None:
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+            wd_map = {
+                WD_ALIGN_PARAGRAPH.LEFT: 'left',
+                WD_ALIGN_PARAGRAPH.CENTER: 'center',
+                WD_ALIGN_PARAGRAPH.RIGHT: 'right',
+                WD_ALIGN_PARAGRAPH.JUSTIFY: 'justify',
+                WD_ALIGN_PARAGRAPH.DISTRIBUTE: 'justify',
+            }
+            return wd_map.get(style_align, 'left')
+    except Exception:
+        pass
+
     return 'left'
 
 
@@ -177,6 +196,62 @@ def normalize_color(color_spec: Any) -> Optional[RGBColor]:
     # Если не удалось распознать, возвращаем None
     logger.warning(f"Не удалось распознать цвет: {color_spec}")
     return None
+
+
+def has_direct_paragraph_formatting(paragraph: Paragraph, property: str) -> bool:
+    """
+    Проверяет, есть ли у параграфа прямое форматирование (в XML) для заданного свойства.
+    property: 'alignment', 'indent', 'spacing', 'first_line'
+    """
+    pPr = paragraph._element.pPr
+    if pPr is None:
+        return False
+
+    if property == 'alignment':
+        return pPr.find(qn('w:jc')) is not None
+
+    if property in ('indent', 'first_line'):
+        ind = pPr.find(qn('w:ind'))
+        if ind is None:
+            return False
+        if property == 'first_line':
+            return ind.get(qn('w:firstLine')) is not None or ind.get(qn('w:firstLineChars')) is not None
+        return True
+
+    if property == 'spacing':
+        return pPr.find(qn('w:spacing')) is not None
+
+    if property == 'left_indent':
+        ind = pPr.find(qn('w:ind'))
+        if ind is None:
+            return False
+        return ind.get(qn('w:left')) is not None
+
+    return False
+
+
+def has_direct_run_formatting(paragraph: Paragraph, property: str) -> bool:
+    """
+    Проверяет, есть ли хотя бы у одного Run параграфа прямое форматирование шрифта.
+    """
+    for run in paragraph.runs:
+        rPr = run._element.find(qn('w:rPr'))
+        if rPr is None:
+            continue
+        if property == 'font_name':
+            rFonts = rPr.find(qn('w:rFonts'))
+            if rFonts is not None:
+                return True
+        elif property == 'font_size':
+            if rPr.find(qn('w:sz')) is not None:
+                return True
+        elif property == 'bold':
+            if rPr.find(qn('w:b')) is not None:
+                return True
+        elif property == 'color':
+            if rPr.find(qn('w:color')) is not None:
+                return True
+    return False
 
 
 def get_font_properties(run) -> Dict[str, Any]:

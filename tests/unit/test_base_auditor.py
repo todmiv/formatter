@@ -184,11 +184,11 @@ class TestBaseAuditor:
         assert len(issues) == 0
 
     def test_check_font_wrong_name(self):
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        """Параграф без прямого форматирования — аудитор проверяет по стилю."""
         auditor = BaseAuditor(self.config)
         doc = Document()
         para = doc.add_paragraph('Test')
-        para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        # Не задаём alignment — берётся из стиля (по умолчанию left)
 
         issues = auditor._check_paragraph_formatting(
             para,
@@ -199,6 +199,7 @@ class TestBaseAuditor:
         assert issues[0].category == 'PARAGRAPH'
 
     def test_check_font_wrong_size(self):
+        """Параграф с прямым форматированием — аудитор ПРОПУСКАЕТ проверку."""
         from docx.enum.text import WD_ALIGN_PARAGRAPH
         auditor = BaseAuditor(self.config)
         doc = Document()
@@ -210,7 +211,8 @@ class TestBaseAuditor:
             {'alignment': 'justify'},
             'Normal', 0, 1
         )
-        assert len(issues) > 0
+        # Прямое форматирование — не ругаемся
+        assert len(issues) == 0
 
     def test_check_paragraph_alignment_correct(self):
         from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -227,11 +229,10 @@ class TestBaseAuditor:
         assert len(issues) == 0
 
     def test_check_paragraph_alignment_wrong(self):
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        """Параграф без прямого форматирования — аудитор находит расхождение."""
         auditor = BaseAuditor(self.config)
         doc = Document()
         para = doc.add_paragraph('Test')
-        para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
         issues = auditor._check_paragraph_formatting(
             para,

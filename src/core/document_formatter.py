@@ -70,7 +70,8 @@ class DocumentFormatter:
         max_iterations: int = 3,
     ) -> AuditFormatResult:
         """Полный цикл: аудит + исправление."""
-        if not self.config_loader:
+        config_loader = self._formatter.config_loader
+        if not config_loader:
             from src.core.formatter_errors import FormatterError, ErrorKind
             raise FormatterError(
                 ErrorKind.CONFIG_NOT_FOUND,
@@ -79,6 +80,7 @@ class DocumentFormatter:
 
         from src.core.audit_engine import AuditEngine
         from src.apply.apply_orchestrator import ApplyOrchestrator
+        from src.core.models import AuditIterationResult
 
         t_start = __import__('time').perf_counter()
         output = output_path or self._formatter._default_output_path(input_path)
@@ -92,7 +94,7 @@ class DocumentFormatter:
 
         try:
             current_path = input_path
-            audit_engine = AuditEngine(self.config_loader)
+            audit_engine = AuditEngine(config_loader)
 
             for iteration in range(max_iterations):
                 t_iter = __import__('time').perf_counter()
@@ -103,22 +105,24 @@ class DocumentFormatter:
                 if not fixable:
                     break
 
-                orchestrator = ApplyOrchestrator(self.config_loader)
+                orchestrator = ApplyOrchestrator(config_loader)
                 stats = orchestrator.apply_fixes(current_path, fixable, output)
 
-                result.iterations.append({
-                    'iteration': iteration + 1,
-                    'issues_found': len(issues),
-                    'issues_fixed': stats['applied'],
-                    'issues_failed': stats['failed'],
-                    'duration': __import__('time').perf_counter() - t_iter,
-                })
+                result.iterations.append(AuditIterationResult(
+                    iteration=iteration + 1,
+                    issues_found=len(issues),
+                    issues_fixed=stats['applied'],
+                    issues_failed=stats['failed'],
+                    duration=__import__('time').perf_counter() - t_iter,
+                ))
 
                 current_path = output
                 if stats['failed'] == 0:
                     break
 
-            final_audit = audit_engine.scan_document(output)
+            # Финальный аудит выполняется по последнему обработанному файлу:
+            # если исправления не применялись — по исходному документу
+            final_audit = audit_engine.scan_document(current_path)
             result.final_stats = {'remaining_issues': len(final_audit)}
             result.success = True
 

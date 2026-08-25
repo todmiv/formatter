@@ -21,7 +21,7 @@ def main():
     # Путь к конфигурации и файлу
     CONFIG_PATH = 'configs/active/config.yaml'
     # Используем существующий тестовый файл
-    DOC_PATH = 'test_output.docx'
+    DOC_PATH = 'tests/test_output.docx'
     # Если файла нет, попробуем другой
     if not os.path.exists(DOC_PATH):
         # Попробуем найти любой .docx файл

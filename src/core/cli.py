@@ -63,18 +63,17 @@ def cmd_audit(args):
         max_iterations=args.max_iterations,
     )
 
-    if result['success']:
-        print(f"Форматирование выполнено: {result['output']}")
-        for it in result['iterations']:
+    if result.success:
+        print(f"Форматирование выполнено: {result.output}")
+        for it in result.iterations:
             print(
-                f"  Итерация {it['iteration']}: "
-                f"найдено {it['issues_found']}, "
-                f"исправлено {it['issues_fixed']}"
+                f"  Итерация {it.iteration}: "
+                f"найдено {it.issues_found}, "
+                f"исправлено {it.issues_fixed}"
             )
-        final = result['final_stats']
-        print(f"Оставшихся проблем: {final['remaining_issues']}")
+        print(f"Оставшихся проблем: {result.final_stats.get('remaining_issues', 0)}")
     else:
-        print(f"Ошибка: {result.get('error')}", file=sys.stderr)
+        print(f"Ошибка: {result.error}", file=sys.stderr)
         return 1
     return 0
 

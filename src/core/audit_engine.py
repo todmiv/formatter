@@ -356,8 +356,9 @@ class AuditEngine:
                     payload={'style': style_name, 'prop': 'font_name'}
                 ))
 
-        # Размер шрифта — пропускаем если задано прямое форматирование
-        if not has_direct_run_formatting(para, 'font_size'):
+        # Размер шрифта — пропускаем если задано прямое форматирование.
+        # Проверка выполняется только если размер указан в конфиге стиля.
+        if 'size' in expected_font and not has_direct_run_formatting(para, 'font_size'):
             actual_size_twips = None
             if rep_run.font.size:
                 actual_size_twips = rep_run.font.size.twips
@@ -365,7 +366,7 @@ class AuditEngine:
                 actual_size_twips = para.style.font.size.twips
 
             if actual_size_twips is not None:
-                expected_twips = expected_font.get('size_twips', 0)
+                expected_twips = expected_font.get('size_twips', int(expected_font['size'] * 20))
                 if abs(actual_size_twips - expected_twips) > self.FONT_SIZE_TOLERANCE_TWIPS:
                     issues.append(self._create_issue(
                         severity=Severity.CRITICAL,
@@ -378,12 +379,14 @@ class AuditEngine:
                         payload={'style': style_name, 'prop': 'font_size'}
                     ))
 
-        # Цвет шрифта — пропускаем если задано прямое форматирование
+        # Цвет шрифта — пропускаем если задано прямое форматирование.
+        # Автоматический цвет (не задан) эквивалентен чёрному и не является
+        # нарушением, если в конфиге ожидается чёрный.
         if 'color' in expected_font and not has_direct_run_formatting(para, 'color'):
             expected_color_str = expected_font['color']
             expected_color = normalize_color(expected_color_str)
             actual_color = rep_run.font.color.rgb if rep_run.font.color and rep_run.font.color.rgb else None
-            if actual_color != expected_color:
+            if actual_color != expected_color and not (actual_color is None and expected_color == normalize_color('000000')):
                 actual_str = str(actual_color) if actual_color else "не задан"
                 expected_str = str(expected_color) if expected_color else "не задан"
                 issues.append(self._create_issue(
@@ -527,7 +530,9 @@ class AuditEngine:
 
     def _audit_tables(self, doc):
         """Аудит таблиц в документе."""
-        expected_style = "Table Grid"
+        # Ожидаемый стиль таблиц из маппинга конфига (или стандартный Table Grid)
+        content_type_styles = self.config.get_config().get('content_type_styles', {}) if self.config.get_config() else {}
+        expected_style = content_type_styles.get('table_grid', 'Table Grid')
         style_config = self.config.get_style_config(expected_style)
         if not style_config:
             logger.warning(f"Стиль таблиц '{expected_style}' не найден в конфигурации. Пропускаем аудит таблиц.")
@@ -691,13 +696,18 @@ class AuditEngine:
             logger.debug("Конфигурация рисунков отсутствует, пропускаем аудит.")
             return
 
-        # Получаем стиль для подписей (05_Номер таблицы или Caption)
-        caption_style_name = '05_Номер таблицы'
+        # Получаем стиль для подписей из маппинга конфига (или известные имена)
+        content_type_styles = self.config.get_config().get('content_type_styles', {}) if self.config.get_config() else {}
+        caption_style_name = content_type_styles.get('caption')
+        if not caption_style_name or not self.config.get_style_config(caption_style_name):
+            for candidate in ('05_Номер таблицы', '05_Номер и название таблицы/рисунка', 'Caption'):
+                style_config = self.config.get_style_config(candidate)
+                if style_config and style_config.get('enabled', True):
+                    caption_style_name = candidate
+                    break
         caption_style_config = self.config.get_style_config(caption_style_name)
         if not caption_style_config or not caption_style_config.get('enabled', True):
-            caption_style_name = 'Caption'
-            caption_style_config = self.config.get_style_config(caption_style_name)
-        if not caption_style_config or not caption_style_config.get('enabled', True):
+            caption_style_name = None
             logger.debug("Стиль подписей не настроен, пропускаем проверку подписей.")
             # Но всё равно проверим наличие подписей
 
@@ -715,9 +725,9 @@ class AuditEngine:
 
         # Проверка подписей на соответствие стилю
         for idx, para in caption_paragraphs:
-            # Проверка стиля
+            # Проверка стиля (только если стиль подписей задан в конфиге)
             actual_style_name = para.style.name
-            if actual_style_name != caption_style_name:
+            if caption_style_name and actual_style_name != caption_style_name:
                 self.issues.append(self._create_issue(
                     severity=Severity.CRITICAL,
                     category="FIGURE",
@@ -729,7 +739,7 @@ class AuditEngine:
                     payload={'style': caption_style_name, 'prop': 'style_name'}
                 ))
             # Проверка шрифта и абзаца, если есть конфигурация
-            if caption_style_config:
+            if caption_style_name and caption_style_config:
                 if 'font' in caption_style_config:
                     issues = self._check_font(para, caption_style_config['font'], caption_style_name, idx, 0)
                     for issue in issues:
@@ -752,7 +762,8 @@ class AuditEngine:
                 desc="Не для всех рисунков есть подписи",
                 current=f"{len(caption_paragraphs)} подписей",
                 expected=f"не менее {len(inline_shapes)} подписей",
-                auto_fixable=False
+                auto_fixable=False,
+                payload={}
             ))
 
         # Проверка положения подписи (должна быть над рисунком)

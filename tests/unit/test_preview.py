@@ -14,7 +14,7 @@ def test_preview():
     
     # Загружаем конфиг и выполняем аудит (имитируем)
     config_path = 'configs/active/config.yaml'
-    doc_path = 'test_output.docx'
+    doc_path = 'tests/test_output.docx'
     if not os.path.exists(doc_path):
         # Попробуем найти другой
         docx_files = [f for f in os.listdir('.') if f.lower().endswith('.docx')]

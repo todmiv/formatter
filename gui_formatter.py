@@ -13,6 +13,7 @@ import time
 from src.core.audit_engine import Severity
 from src.core.docx_utils import MM_TO_TWIPS, PT_TO_TWIPS
 from src.core.main_controller import MainController
+from src.core.word_com_generator import WordComGenerator, is_word_available
 from src.config_editor.dialog import ConfigEditorDialog
 from monitor import open_monitor
 
@@ -22,6 +23,9 @@ from gui.document_tree_mixin import DocumentTreeMixin
 from gui.export_mixin import ExportMixin
 from gui.settings_mixin import SettingsMixin
 from gui.highlight_mixin import HighlightMixin
+from gui.wizard_mixin import WizardMixin
+from gui.template_mixin import TemplateMixin
+from gui.replace_styles_mixin import ReplaceStylesMixin
 
 # Настройка логирования
 logging.basicConfig(
@@ -34,7 +38,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class GOSTFormatterGUI(AuditMixin, DocumentTreeMixin, ExportMixin, SettingsMixin, HighlightMixin):
+class GOSTFormatterGUI(AuditMixin, DocumentTreeMixin, ExportMixin, SettingsMixin, HighlightMixin, WizardMixin, TemplateMixin, ReplaceStylesMixin):
     def __init__(self, root):
         self.root = root
         self.root.title("Форматировщик документов по ГОСТ (Audit & Apply)")
@@ -64,69 +68,7 @@ class GOSTFormatterGUI(AuditMixin, DocumentTreeMixin, ExportMixin, SettingsMixin
         self._sync_ui_with_controller()
 
     def _init_ui(self):
-        # --- Верхняя панель: Файлы и Конфиг ---
-        top_frame = ttk.LabelFrame(self.root, text="Настройки", padding=10)
-        top_frame.pack(fill=tk.X, padx=10, pady=5)
-
-        # Выбор файла
-        ttk.Label(top_frame, text="Документ:").grid(row=0, column=0, sticky=tk.W, pady=5)
-        self.entry_file = ttk.Entry(top_frame, width=50)
-        self.entry_file.grid(row=0, column=1, padx=5, pady=5)
-        ttk.Button(top_frame, text="Обзор...", command=self.browse_file).grid(row=0, column=2, pady=5)
-        ttk.Button(top_frame, text="Открыть для просмотра", command=self.open_document_for_view).grid(row=0, column=3, padx=(5,0), pady=5)
-        ttk.Button(top_frame, text=" Импорт из Markdown", command=self.import_markdown).grid(row=0, column=4, padx=(5,0), pady=5)
-
-        # Выбор конфига
-        ttk.Label(top_frame, text="Конфиг:").grid(row=1, column=0, sticky=tk.W, pady=5)
-        self.entry_config = ttk.Entry(top_frame, width=50)
-        self.entry_config.insert(0, self.config_path)
-        self.entry_config.grid(row=1, column=1, padx=5, pady=5)
-        ttk.Button(top_frame, text="Обзор...", command=self.browse_config).grid(row=1, column=2, pady=5)
-        ttk.Button(top_frame, text="Открыть для редактирования", command=self.open_config_editor_window).grid(row=1, column=3, padx=(5,0), pady=5)
-
-        # Выбор шаблона (reference document)
-        ttk.Label(top_frame, text="Шаблон:").grid(row=2, column=0, sticky=tk.W, pady=5)
-        self.entry_template = ttk.Entry(top_frame, width=50)
-        self.entry_template.grid(row=2, column=1, padx=5, pady=5)
-        ttk.Button(top_frame, text="Обзор...", command=self.browse_template).grid(row=2, column=2, pady=5)
-        ttk.Button(top_frame, text="Применить шаблон", command=self.apply_template).grid(row=2, column=3, padx=(5,0), pady=5)
-        ttk.Button(top_frame, text="Извлечь конфиг", command=self.extract_config_from_template).grid(row=2, column=4, padx=(5,0), pady=5)
-
-        # --- Панель действий ---
-        action_frame = ttk.Frame(self.root, padding=5)
-        action_frame.pack(fill=tk.X, padx=10, pady=5)
-
-        self.btn_audit = ttk.Button(action_frame, text="🔍 Начать аудит", command=self.start_audit_thread)
-        self.btn_audit.pack(side=tk.LEFT, padx=5)
-
-        self.btn_highlight = ttk.Button(action_frame, text="🔦 Подсветить проблемные места", command=self.highlight_issues)
-        self.btn_highlight.pack(side=tk.LEFT, padx=5)
-
-        self.btn_fix_selected = ttk.Button(action_frame, text="🛠 Исправить выбранные", command=self.fix_selected, state=tk.DISABLED)
-        self.btn_fix_selected.pack(side=tk.LEFT, padx=5)
-
-        self.btn_fix_styles_only = ttk.Button(action_frame, text="🎨 Исправить только стили", command=self.fix_styles_only, state=tk.DISABLED)
-        self.btn_fix_styles_only.pack(side=tk.LEFT, padx=5)
-
-        self.btn_fix_all = ttk.Button(action_frame, text="⚡ Исправить всё", command=self.fix_all, state=tk.DISABLED)
-        self.btn_fix_all.pack(side=tk.LEFT, padx=5)
-
-        self.btn_export_report = ttk.Button(action_frame, text="📄 Экспорт отчёта", command=self.export_report, state=tk.DISABLED)
-        self.btn_export_report.pack(side=tk.LEFT, padx=5)
-
-        self.btn_settings = ttk.Button(action_frame, text="⚙ Настройки", command=self.open_settings)
-        self.btn_settings.pack(side=tk.LEFT, padx=5)
-
-        self.btn_ignore_settings = ttk.Button(action_frame, text="👁 Игнорировать ошибки", command=self.open_ignore_settings)
-        self.btn_ignore_settings.pack(side=tk.LEFT, padx=5)
-
-        self.btn_monitor = ttk.Button(action_frame, text="📊 Мониторинг", command=self.open_monitor_window)
-        self.btn_monitor.pack(side=tk.LEFT, padx=5)
-
-        self.btn_save = ttk.Button(action_frame, text="💾 Сохранить результат", command=self.save_document, state=tk.DISABLED)
-        self.btn_save.pack(side=tk.RIGHT, padx=5)
-
-        # --- Статус бар ---
+        # === Статус бар (внизу) ===
         self.status_var = tk.StringVar(value="Готов к работе. Выберите документ.")
         status_bar = ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
         status_bar.pack(fill=tk.X, side=tk.BOTTOM)
@@ -135,140 +77,177 @@ class GOSTFormatterGUI(AuditMixin, DocumentTreeMixin, ExportMixin, SettingsMixin
         self.progress_bar = ttk.Progressbar(self.root, variable=self.progress_var, maximum=100, mode='determinate')
         self.progress_bar.pack(fill=tk.X, side=tk.BOTTOM)
 
-        # Веса этапов аудита (в процентах от общего прогресса)
+        # === Вкладки (Notebook) ===
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        # Вкладка 1: MD → DOCX (мастер)
+        wiz_tab = ttk.Frame(self.notebook)
+        self.notebook.add(wiz_tab, text="  📄 MD → DOCX  ")
+        wiz_content = self._create_wizard_tab(wiz_tab)
+        wiz_content.pack(fill=tk.BOTH, expand=True)
+
+        # Вкладка 2: Аудит DOCX
+        audit_tab = ttk.Frame(self.notebook)
+        self.notebook.add(audit_tab, text="  🔍 Аудит  ")
+        audit_content = self._create_audit_tab(audit_tab)
+        audit_content.pack(fill=tk.BOTH, expand=True)
+
+        # Вкладка 3: Шаблоны
+        tmpl_tab = ttk.Frame(self.notebook)
+        self.notebook.add(tmpl_tab, text="  📋 Шаблоны  ")
+        tmpl_content = self._create_template_tab(tmpl_tab)
+        tmpl_content.pack(fill=tk.BOTH, expand=True)
+
+        # Вкладка 4: Замена стилей
+        rs_tab = ttk.Frame(self.notebook)
+        self.notebook.add(rs_tab, text="  ⚡ Замена стилей  ")
+        rs_content = self._create_replace_styles_tab(rs_tab)
+        rs_content.pack(fill=tk.BOTH, expand=True)
+
+        # === Лог (внизу) ===
+        log_frame = ttk.LabelFrame(self.root, text="Лог", padding=5)
+        log_frame.pack(fill=tk.X, padx=10, pady=(0,5))
+        self.log_text = scrolledtext.ScrolledText(log_frame, height=4, state='disabled')
+        self.log_text.pack(fill=tk.BOTH, expand=True)
+
+        # Веса этапов аудита
         self.audit_stage_weights = {
-            'page_setup': 5,
-            'paragraphs': 70,
-            'tables': 10,
-            'headers_footers': 10,
-            'images': 5
+            'page_setup': 5, 'paragraphs': 70, 'tables': 10,
+            'headers_footers': 10, 'images': 5
         }
-        # Текущий прогресс по этапам (накопленная сумма весов завершённых этапов)
         self.audit_stage_completed = 0
-        # Текущий этап (для отображения)
         self.current_stage = ''
 
-        # --- Основная область: Трёхпанельный интерфейс ---
-        main_paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
-        main_paned.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+    def _create_audit_tab(self, parent):
+        """Создаёт содержимое вкладки 'Аудит'."""
+        main = ttk.Frame(parent, padding=5)
 
-        # --- Левая панель: Дерево документа ---
-        left_frame = ttk.LabelFrame(main_paned, text="Структура документа", padding=5)
+        # === Верхняя панель: Файлы и Конфиг ===
+        top_frame = ttk.LabelFrame(main, text="Настройки", padding=10)
+        top_frame.pack(fill=tk.X, pady=(0, 5))
+
+        ttk.Label(top_frame, text="Документ:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        self.entry_file = ttk.Entry(top_frame, width=50)
+        self.entry_file.grid(row=0, column=1, padx=5, pady=5)
+        ttk.Button(top_frame, text="Обзор...", command=self.browse_file).grid(row=0, column=2, pady=5)
+        ttk.Button(top_frame, text="Открыть", command=self.open_document_for_view).grid(row=0, column=3, padx=(5,0), pady=5)
+
+        ttk.Label(top_frame, text="Конфиг:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        self.entry_config = ttk.Entry(top_frame, width=50)
+        self.entry_config.insert(0, self.config_path)
+        self.entry_config.grid(row=1, column=1, padx=5, pady=5)
+        ttk.Button(top_frame, text="Обзор...", command=self.browse_config).grid(row=1, column=2, pady=5)
+        ttk.Button(top_frame, text="Ред.", command=self.open_config_editor_window).grid(row=1, column=3, padx=(5,0), pady=5)
+
+        ttk.Label(top_frame, text="Шаблон:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        self.entry_template = ttk.Entry(top_frame, width=50)
+        self.entry_template.grid(row=2, column=1, padx=5, pady=5)
+        ttk.Button(top_frame, text="Обзор...", command=self.browse_template).grid(row=2, column=2, pady=5)
+        ttk.Button(top_frame, text="Применить", command=self.apply_template).grid(row=2, column=3, padx=(5,0), pady=5)
+
+        # === Панель действий ===
+        action_frame = ttk.Frame(main, padding=5)
+        action_frame.pack(fill=tk.X)
+
+        self.btn_audit = ttk.Button(action_frame, text="🔍 Аудит", command=self.start_audit_thread)
+        self.btn_audit.pack(side=tk.LEFT, padx=3)
+
+        self.btn_fix_selected = ttk.Button(action_frame, text="Исправить выбранное", command=self.fix_selected, state=tk.DISABLED)
+        self.btn_fix_selected.pack(side=tk.LEFT, padx=3)
+
+        self.btn_fix_all = ttk.Button(action_frame, text="Исправить всё", command=self.fix_all, state=tk.DISABLED)
+        self.btn_fix_all.pack(side=tk.LEFT, padx=3)
+
+        self.btn_fix_styles_only = ttk.Button(action_frame, text="Только стили", command=self.fix_styles_only, state=tk.DISABLED)
+        self.btn_fix_styles_only.pack(side=tk.LEFT, padx=3)
+
+        self.btn_highlight = ttk.Button(action_frame, text="🔦 Подсветить", command=self.highlight_issues)
+        self.btn_highlight.pack(side=tk.LEFT, padx=3)
+
+        self.btn_export_report = ttk.Button(action_frame, text="📄 Отчёт", command=self.export_report, state=tk.DISABLED)
+        self.btn_export_report.pack(side=tk.LEFT, padx=3)
+
+        self.btn_settings = ttk.Button(action_frame, text="⚙", command=self.open_settings)
+        self.btn_settings.pack(side=tk.LEFT, padx=3)
+
+        self.btn_monitor = ttk.Button(action_frame, text="📊", command=self.open_monitor_window)
+        self.btn_monitor.pack(side=tk.LEFT, padx=3)
+
+        self.btn_save = ttk.Button(action_frame, text="💾 Сохранить", command=self.save_document, state=tk.DISABLED)
+        self.btn_save.pack(side=tk.RIGHT, padx=3)
+
+        # === Трёхпанельный интерфейс ===
+        paned = ttk.PanedWindow(main, orient=tk.HORIZONTAL)
+        paned.pack(fill=tk.BOTH, expand=True, pady=5)
+
+        # Левая: Дерево документа
+        left_frame = ttk.LabelFrame(paned, text="Структура", padding=5)
         self.doc_tree = ttk.Treeview(left_frame, columns=("type", "text"), show="tree", selectmode="browse")
         self.doc_tree.heading("#0", text="Элемент")
-        self.doc_tree.column("#0", width=200)
-        self.doc_tree.column("type", width=80, stretch=False)
-        self.doc_tree.column("text", width=200)
+        self.doc_tree.column("#0", width=180)
+        self.doc_tree.column("type", width=60, stretch=False)
+        self.doc_tree.column("text", width=150)
         doc_tree_scroll = ttk.Scrollbar(left_frame, orient=tk.VERTICAL, command=self.doc_tree.yview)
         self.doc_tree.configure(yscrollcommand=doc_tree_scroll.set)
         self.doc_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         doc_tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        main_paned.add(left_frame, weight=1)
+        paned.add(left_frame, weight=1)
 
-        # --- Центральная панель: Таблица проблем ---
-        center_frame = ttk.LabelFrame(main_paned, text="Отчет аудита (Найденные несоответствия)", padding=5)
-        
-        # Фильтры и кнопки над таблицей
+        # Центр: Таблица проблем
+        center_frame = ttk.Frame(paned)
+
         filter_frame = ttk.Frame(center_frame)
-        filter_frame.pack(fill=tk.X, pady=(0, 5))
-        
+        filter_frame.pack(fill=tk.X, pady=(0, 3))
         ttk.Label(filter_frame, text="Фильтр:").pack(side=tk.LEFT)
         self.filter_var = tk.StringVar(value="ALL")
-        cb_filter = ttk.Combobox(filter_frame, textvariable=self.filter_var, values=["ALL", "CRITICAL", "WARNING", "INFO"], state="readonly", width=15)
+        cb_filter = ttk.Combobox(filter_frame, textvariable=self.filter_var,
+                                  values=["ALL", "CRITICAL", "WARNING", "INFO"],
+                                  state="readonly", width=12)
         cb_filter.pack(side=tk.LEFT, padx=5)
         cb_filter.bind("<<ComboboxSelected>>", self.apply_filter)
-        
-        # Чекбокс "Выделить все"
         self.select_all_var = tk.BooleanVar(value=False)
-        select_all_cb = ttk.Checkbutton(filter_frame, text="Выделить все", variable=self.select_all_var, command=self.toggle_select_all)
-        select_all_cb.pack(side=tk.LEFT, padx=10)
-        
-        ttk.Button(filter_frame, text="Снять выделение", command=self.deselect_all).pack(side=tk.RIGHT, padx=5)
-        ttk.Button(filter_frame, text="Исключить из отчёта", command=self.exclude_selected).pack(side=tk.RIGHT, padx=5)
+        ttk.Checkbutton(filter_frame, text="Все", variable=self.select_all_var,
+                         command=self.toggle_select_all).pack(side=tk.LEFT, padx=5)
+        ttk.Button(filter_frame, text="Исключить", command=self.exclude_selected).pack(side=tk.RIGHT, padx=3)
 
-        # Контейнер для таблицы
         tree_container = ttk.Frame(center_frame)
         tree_container.pack(fill=tk.BOTH, expand=True)
 
-        # Таблица (Treeview) с чекбоксами (пока без чекбоксов, добавим позже)
         columns = ("id", "severity", "category", "element", "location", "description", "current", "expected")
         self.tree = ttk.Treeview(tree_container, columns=columns, show="headings", selectmode="extended")
-        
-        # Настройка заголовков с поддержкой сортировки
-        self.tree.heading("id", text="#", command=lambda: self.treeview_sort_column("id", False))
-        self.tree.column("id", width=30)
-        
-        self.tree.heading("severity", text="Важность", command=lambda: self.treeview_sort_column("severity", False))
-        self.tree.column("severity", width=80)
-        
-        self.tree.heading("category", text="Категория", command=lambda: self.treeview_sort_column("category", False))
-        self.tree.column("category", width=80)
-        
-        self.tree.heading("element", text="Стиль", command=lambda: self.treeview_sort_column("element", False))
-        self.tree.column("element", width=100)
-        
-        self.tree.heading("location", text="Локация", command=lambda: self.treeview_sort_column("location", False))
-        self.tree.column("location", width=80)
-        
-        self.tree.heading("description", text="Проблема", command=lambda: self.treeview_sort_column("description", False))
-        self.tree.column("description", width=200)
-        
-        self.tree.heading("current", text="Текущее", command=lambda: self.treeview_sort_column("current", False))
-        self.tree.column("current", width=120)
-        
-        self.tree.heading("expected", text="Ожидается", command=lambda: self.treeview_sort_column("expected", False))
-        self.tree.column("expected", width=120)
+        for col, text, width in [("id","#",30),("severity","Важн.",60),("category","Катег.",60),
+                                  ("element","Стиль",80),("location","Лок.",60),
+                                  ("description","Проблема",160),("current","Текущее",100),("expected","Ожид.",100)]:
+            self.tree.heading(col, text=text, command=lambda c=col: self.treeview_sort_column(c, False))
+            self.tree.column(col, width=width)
 
-        # Скроллбары
         vsb = ttk.Scrollbar(tree_container, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(tree_container, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-
-        # Размещение внутри tree_container с grid
         self.tree.grid(row=0, column=0, sticky='nsew')
         vsb.grid(row=0, column=1, sticky='ns')
         hsb.grid(row=1, column=0, sticky='ew')
         tree_container.grid_rowconfigure(0, weight=1)
         tree_container.grid_columnconfigure(0, weight=1)
-
-        # Привязка события выбора для обновления деталей
         self.tree.bind('<<TreeviewSelect>>', self.on_tree_select)
+        self.tree.tag_configure('critical', background='#ffcccc')
+        self.tree.tag_configure('warning', background='#fff3cd')
+        self.tree.tag_configure('info', background='#d1ecf1')
 
-        # Настройка тегов для цветовой кодировки строк
-        self.tree.tag_configure('critical', background='#ffcccc', foreground='black')
-        self.tree.tag_configure('warning', background='#fff3cd', foreground='black')
-        self.tree.tag_configure('info', background='#d1ecf1', foreground='black')
+        paned.add(center_frame, weight=3)
 
-        main_paned.add(center_frame, weight=3)
-
-        # --- Правая панель: Детали ошибки и предпросмотр ---
-        right_frame = ttk.LabelFrame(main_paned, text="Детали ошибки", padding=5)
-        
-        # Детали
-        details_label = ttk.Label(right_frame, text="Выберите ошибку для просмотра деталей", wraplength=250)
-        details_label.pack(pady=5)
-        
+        # Правая: Детали
+        right_frame = ttk.LabelFrame(paned, text="Детали", padding=5)
         self.details_text = scrolledtext.ScrolledText(right_frame, height=10, state='disabled')
         self.details_text.pack(fill=tk.BOTH, expand=True, pady=5)
-
-        # Кнопка "Найти в документе"
-        self.btn_find_in_doc = ttk.Button(right_frame, text="🔍 Найти в документе", command=self.find_in_document, state=tk.DISABLED)
-        self.btn_find_in_doc.pack(pady=5)
-        
-        # Предпросмотр
-        preview_label = ttk.Label(right_frame, text="Предпросмотр фрагмента")
-        preview_label.pack(pady=(10,0))
-        
-        self.preview_text = scrolledtext.ScrolledText(right_frame, height=8, state='disabled')
+        self.btn_find_in_doc = ttk.Button(right_frame, text="🔍 Найти", command=self.find_in_document, state=tk.DISABLED)
+        self.btn_find_in_doc.pack(pady=3)
+        self.preview_text = scrolledtext.ScrolledText(right_frame, height=6, state='disabled')
         self.preview_text.pack(fill=tk.BOTH, expand=True)
-        
-        main_paned.add(right_frame, weight=2)
+        paned.add(right_frame, weight=2)
 
-        # --- Лог операций (под трёхпанельным интерфейсом) ---
-        log_frame = ttk.LabelFrame(self.root, text="Лог операций", padding=5)
-        log_frame.pack(fill=tk.X, padx=10, pady=(0,5))
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=4, state='disabled')
-        self.log_text.pack(fill=tk.BOTH, expand=True)
+        return main
 
     def _load_config(self):
         """Предварительная загрузка конфига для проверки (оставлено для совместимости)"""
@@ -279,14 +258,11 @@ class GOSTFormatterGUI(AuditMixin, DocumentTreeMixin, ExportMixin, SettingsMixin
             self.log("Файл конфигурации не найден. Используйте стандартный или выберите другой.")
     
     def _sync_ui_with_controller(self):
-        """Синхронизирует UI с состоянием контроллера (например, допуски)."""
-        # Устанавливаем допуски из контроллера в локальные переменные для UI
+        """Синхронизирует UI с состоянием контроллера."""
         self.font_tolerance = self.controller.font_tolerance
         self.indent_tolerance = self.controller.indent_tolerance
         self.spacing_tolerance = self.controller.spacing_tolerance
-        # Синхронизируем путь конфига
         self.config_path = self.controller.config_path
-        # Обновляем поле конфига, если нужно
         if hasattr(self, 'entry_config'):
             self.entry_config.delete(0, tk.END)
             self.entry_config.insert(0, self.controller.config_path)
@@ -582,6 +558,43 @@ class GOSTFormatterGUI(AuditMixin, DocumentTreeMixin, ExportMixin, SettingsMixin
         except Exception as e:
             self.log(f"Ошибка извлечения конфига: {e}")
             messagebox.showerror("Ошибка", f"Не удалось извлечь конфиг:\n{e}")
+
+    def create_from_template(self):
+        """Создание нового документа из шаблона через Word COM."""
+        template_path = self.entry_template.get().strip()
+        if not template_path or not os.path.exists(template_path):
+            messagebox.showwarning("Внимание", "Выберите DOCX-шаблон.")
+            return
+
+        output_path = filedialog.asksaveasfilename(
+            defaultextension=".docx",
+            initialfile="new_document.docx",
+            filetypes=[("Word Documents", "*.docx")],
+            title="Сохранить новый документ"
+        )
+        if not output_path:
+            return
+
+        self.status_var.set("Создание документа из шаблона...")
+
+        def create_thread():
+            try:
+                gen = WordComGenerator(template_path)
+                # Пустой документ — только стили шаблона
+                result = gen.create_document(output_path, [])
+                self.root.after(0, lambda: (
+                    self.status_var.set(f"Документ создан: {os.path.basename(result)}"),
+                    self.log(f"Создан документ из шаблона: {result}"),
+                    messagebox.showinfo("Готово", f"Документ создан:\n{result}\n\nШаблон: {os.path.basename(template_path)}")
+                ))
+            except Exception as e:
+                self.root.after(0, lambda: (
+                    self.status_var.set("Ошибка создания документа"),
+                    self.log(f"Ошибка: {e}"),
+                    messagebox.showerror("Ошибка", f"Не удалось создать документ:\n{e}")
+                ))
+
+        threading.Thread(target=create_thread, daemon=True).start()
 
     def open_document_for_view(self):
         """Открыть выбранный документ для просмотра в ассоциированном приложении."""

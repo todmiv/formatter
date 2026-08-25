@@ -141,6 +141,14 @@ class PageManager:
         if content_type == 'page_number':
             # Добавляем номер страницы как поле PAGE
             paragraph = header.add_paragraph()
+
+            # Применяем стиль колонтитула из документа (если определён в конфиге)
+            doc = section.part.document
+            if 'Header' in doc.styles:
+                paragraph.style = doc.styles['Header']
+            # Колонтитулы без красной строки
+            paragraph.paragraph_format.first_line_indent = Cm(0)
+
             run = paragraph.add_run()
             fldChar = OxmlElement('w:fldChar')
             fldChar.set(qn('w:fldCharType'), 'begin')
@@ -194,6 +202,13 @@ class PageManager:
 
         if content_type == 'section_chapter_number':
             paragraph = footer.add_paragraph("РАЗДЕЛ 1. ГЛАВА 1")
+
+            # Применяем стиль колонтитула из документа (если определён в конфиге)
+            doc = section.part.document
+            if 'Footer' in doc.styles:
+                paragraph.style = doc.styles['Footer']
+            paragraph.paragraph_format.first_line_indent = Cm(0)
+
             paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
             font_cfg = config.get('font', {})

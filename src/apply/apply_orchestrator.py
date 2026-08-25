@@ -96,6 +96,8 @@ class ApplyOrchestrator:
                     success = self.table_applier.apply(doc, issue)
                 elif issue.category in ('HEADER', 'FOOTER', 'HEADER_FOOTER'):
                     success = self.header_footer_applier.apply(doc, issue)
+                elif issue.category == 'PAGE':
+                    success = self._apply_page_fix(doc, issue)
                 else:
                     logger.warning(f"Неизвестная категория {issue.category} для исправления {issue.id}")
                     success = False
@@ -125,6 +127,53 @@ class ApplyOrchestrator:
             return {'applied': self.applied_count, 'failed': self.failed_count + 1}  # +1 за ошибку сохранения
 
         return {'applied': self.applied_count, 'failed': self.failed_count}
+
+    def _apply_page_fix(self, doc, issue: AuditIssue) -> bool:
+        """Применяет исправление настроек страницы (поля, ориентация)."""
+        try:
+            prop = issue.fix_payload.get('prop', '')
+            section_idx = issue.location.get('section', 0)
+
+            if section_idx >= len(doc.sections):
+                logger.warning(f"Секция {section_idx} вне диапазона (всего {len(doc.sections)})")
+                return False
+
+            section = doc.sections[section_idx]
+            page_setup = self.config.get_page_setup()
+
+            if not page_setup:
+                logger.warning("Конфигурация page_setup отсутствует")
+                return False
+
+            orientation = page_setup.get('orientation_default', 'portrait')
+            margins = page_setup.get(orientation, {})
+
+            from docx.shared import Cm
+
+            margin_map = {
+                'left_margin': ('left_margin_cm', 'left_margin'),
+                'right_margin': ('right_margin_cm', 'right_margin'),
+                'top_margin': ('top_margin_cm', 'top_margin'),
+                'bottom_margin': ('bottom_margin_cm', 'bottom_margin'),
+            }
+
+            if prop in margin_map:
+                cfg_key, attr_name = margin_map[prop]
+                if cfg_key in margins:
+                    setattr(section, attr_name, Cm(margins[cfg_key]))
+                    logger.debug(f"Поле {prop} установлено в {margins[cfg_key]} см (секция {section_idx})")
+                    return True
+
+            # Если prop не указан — применяем все поля сразу
+            for prop_name, (cfg_key, attr_name) in margin_map.items():
+                if cfg_key in margins:
+                    setattr(section, attr_name, Cm(margins[cfg_key]))
+
+            logger.debug(f"Все поля страницы применены к секции {section_idx}")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при исправлении страницы {issue.id}: {e}")
+            return False
 
     def apply_fixes_iterative(self, doc_path: str, issues: List[AuditIssue], output_path: Optional[str] = None,
                               max_iterations: int = 3, apply_styles: bool = True,
